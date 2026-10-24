@@ -1219,6 +1219,21 @@ class MintVaultWindow(Gtk.Window):
         dup_row.pack_start(combo_dup, False, False, 0)
         sec2.pack_start(dup_row, False, False, 2)
 
+        ext_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        lbl_ext_act = Gtk.Label(label=tr(lang, "settings_lbl_ext_action"))
+        lbl_ext_act.set_xalign(0.0)
+        lbl_ext_act.set_hexpand(True)
+        combo_ext = Gtk.ComboBoxText()
+        combo_ext.append("ask", tr(lang, "settings_dup_ask"))
+        combo_ext.append("skip", tr(lang, "settings_dup_skip"))
+        combo_ext.append("keep_both", tr(lang, "settings_dup_keep_both"))
+        combo_ext.append("replace", tr(lang, "settings_dup_replace"))
+        combo_ext.append("error", tr(lang, "settings_dup_error"))
+        combo_ext.set_active_id(self.app_settings.extract_conflict_action)
+        ext_row.pack_start(lbl_ext_act, True, True, 0)
+        ext_row.pack_start(combo_ext, False, False, 0)
+        sec2.pack_start(ext_row, False, False, 2)
+
         chk_ask_del_orig = Gtk.CheckButton(
             label=tr(lang, "settings_chk_ask_before_deleting_originals")
         )
@@ -1359,6 +1374,7 @@ class MintVaultWindow(Gtk.Window):
                 combo_lang.set_active_id(s.language)
                 spin_font.set_value(s.ui_font_scale)
                 combo_dup.set_active_id(s.duplicate_file_action)
+                combo_ext.set_active_id(s.extract_conflict_action)
                 chk_ask_del_orig.set_active(s.ask_before_deleting_originals)
                 chk_offer_del_orig.set_active(s.offer_delete_originals_after_add)
                 chk_conf_vdel.set_active(s.confirm_before_vault_delete)
@@ -1386,6 +1402,7 @@ class MintVaultWindow(Gtk.Window):
                 theme=combo_theme.get_active_id() or "system",
                 ui_font_scale=int(spin_font.get_value_as_int()),
                 duplicate_file_action=combo_dup.get_active_id() or "ask",
+                extract_conflict_action=combo_ext.get_active_id() or "ask",
                 ask_before_deleting_originals=chk_ask_del_orig.get_active(),
                 offer_delete_originals_after_add=chk_offer_del_orig.get_active(),
                 language=combo_lang.get_active_id() or "ru",
@@ -2113,6 +2130,49 @@ class MintVaultWindow(Gtk.Window):
             _on_orig_deleted,
         )
 
+    def _ask_extract_conflict_resolution(self, conflicts: List[Path], dest_root: Path) -> Optional[str]:
+        """
+        Показывает диалог выбора действия, если в папке извлечения уже есть некоторые файлы.
+        Возвращает 'skip', 'keep_both', 'replace' или None (если нажата Отмена).
+        """
+        rel_names = []
+        for cp in conflicts[:8]:
+            try:
+                rel_names.append(f"• {cp.relative_to(dest_root)}")
+            except ValueError:
+                rel_names.append(f"• {cp.name}")
+        preview = "\n".join(rel_names)
+        if len(conflicts) > 8:
+            preview += "\n" + self._t("and_more_items", count=len(conflicts) - 8)
+
+        dlg = Gtk.MessageDialog(
+            transient_for=self,
+            flags=Gtk.DialogFlags.MODAL,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.NONE,
+            text=self._t("dlg_ext_conflict_title"),
+        )
+        dlg.format_secondary_text(
+            self._t("dlg_ext_conflict_body", count=len(conflicts), preview=preview)
+        )
+        dlg.add_button(self._t("btn_cancel"), Gtk.ResponseType.CANCEL)
+        btn_skip = dlg.add_button(self._t("btn_ext_skip"), 201)
+        btn_skip.get_style_context().add_class("primary-button")
+        dlg.add_button(self._t("btn_ext_keep_both"), 202)
+        btn_repl = dlg.add_button(self._t("btn_ext_replace"), 203)
+        btn_repl.get_style_context().add_class("danger-button")
+        dlg.set_default_response(201)
+
+        resp = dlg.run()
+        dlg.destroy()
+        if resp == 201:
+            return "skip"
+        if resp == 202:
+            return "keep_both"
+        if resp == 203:
+            return "replace"
+        return None
+
     def _on_extract_clicked(self, _btn: Gtk.Button) -> None:
         if not self.vault or not self.vault.is_unlocked or self.is_busy:
             return
@@ -2165,6 +2225,31 @@ class MintVaultWindow(Gtk.Window):
 
         target_vault = self.vault
         notify_done = self.app_settings.notify_long_operations
+        ext_policy = self.app_settings.extract_conflict_action
+
+        if ext_policy == "ask":
+            try:
+                ext_conflicts = target_vault.find_extraction_conflicts(
+                    virtual_paths=selected_vps,
+                    destination_dir=dest_folder,
+                    preserve_structure=True,
+                )
+            except Exception as exc:
+                self._show_message_dialog(
+                    Gtk.MessageType.ERROR,
+                    self._t("dlg_op_failed_title"),
+                    str(exc),
+                )
+                return
+
+            if ext_conflicts:
+                chosen_ext = self._ask_extract_conflict_resolution(ext_conflicts, Path(dest_folder))
+                if chosen_ext is None:
+                    self.status_label.set_text(self._t("status_cancelled"))
+                    return
+                ext_policy = chosen_ext
+            else:
+                ext_policy = "error"
 
         def _worker(cancel_cb: Callable[[], bool], prog_cb: Callable[[int, int, str], None]) -> List[Path]:
             return target_vault.extract_entries(
@@ -2173,9 +2258,13 @@ class MintVaultWindow(Gtk.Window):
                 preserve_structure=True,
                 cancel_check=cancel_cb,
                 progress_cb=prog_cb,
+                on_conflict=ext_policy,
             )
 
         def _on_extracted(extracted: List[Path]) -> None:
+            if not extracted and ext_policy == "skip":
+                self.status_label.set_text(self._t("status_extracted_all_skipped"))
+                return
             self.status_label.set_text(
                 self._t("status_extracted_ok", count=len(extracted), dest=dest_folder)
             )

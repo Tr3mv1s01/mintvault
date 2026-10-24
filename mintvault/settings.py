@@ -68,6 +68,7 @@ class AppSettings:
 
     # 4.2. Поведение при добавлении файлов и работе с оригиналами
     duplicate_file_action: str = "ask"  # "ask" | "replace" | "keep_both" | "skip" | "error"
+    extract_conflict_action: str = "ask"  # "ask" | "skip" | "keep_both" | "replace" | "error"
     ask_before_deleting_originals: bool = True
     offer_delete_originals_after_add: bool = False
 
@@ -171,6 +172,14 @@ def sanitize_and_validate_settings(raw_data: Any) -> Tuple[AppSettings, list[str
     if not ok and "duplicate_file_action" in raw_data:
         warnings.append("Некорректное значение 'duplicate_file_action'; использовано 'ask'.")
 
+    ext_act, ok = _validate_choice(
+        raw_data.get("extract_conflict_action", defaults.extract_conflict_action),
+        defaults.extract_conflict_action,
+        VALID_DUPLICATE_ACTIONS,
+    )
+    if not ok and "extract_conflict_action" in raw_data:
+        warnings.append("Некорректное значение 'extract_conflict_action'; использовано 'ask'.")
+
     ask_del, ok = _validate_bool(
         raw_data.get("ask_before_deleting_originals", defaults.ask_before_deleting_originals),
         defaults.ask_before_deleting_originals,
@@ -244,6 +253,7 @@ def sanitize_and_validate_settings(raw_data: Any) -> Tuple[AppSettings, list[str
         theme=theme,
         ui_font_scale=ui_font_scale,
         duplicate_file_action=dup_act,
+        extract_conflict_action=ext_act,
         ask_before_deleting_originals=ask_del,
         offer_delete_originals_after_add=offer_del,
         language=language,

@@ -600,6 +600,34 @@ class TestSettingsOriginalsAndGuiLocalization(unittest.TestCase):
             self.assertEqual((out_dir / "report.txt").read_text(encoding="utf-8"), "Версия 3 (обновлённая)")
             self.assertEqual((out_dir / "report (1).txt").read_text(encoding="utf-8"), "Версия 2")
             self.assertTrue(vault.verify_integrity().is_valid)
+            # 4. Проверяем извлечение в папку, где часть файлов и подпапок уже существует
+            ext_partial = self.tmp_dir / "ext_partial"
+            ext_partial.mkdir()
+            existing_report = ext_partial / "report.txt"
+            existing_report.write_text("Старый файл на флешке", encoding="utf-8")
+
+            conflicts_found = vault.find_extraction_conflicts(["report.txt", "report (1).txt"], ext_partial)
+            self.assertEqual(conflicts_found, [existing_report.resolve()])
+
+            # Режим skip: существующий report.txt не тронут, а report (1).txt докачивается!
+            ext_skipped = vault.extract_entries(
+                ["report.txt", "report (1).txt"], ext_partial, on_conflict="skip"
+            )
+            self.assertEqual(len(ext_skipped), 1)
+            self.assertEqual(existing_report.read_text(encoding="utf-8"), "Старый файл на флешке")
+            self.assertEqual((ext_partial / "report (1).txt").read_text(encoding="utf-8"), "Версия 2")
+
+            # Режим keep_both: создаётся копия report (2).txt на диске
+            ext_both = vault.extract_entries(["report.txt"], ext_partial, on_conflict="keep_both")
+            self.assertEqual(len(ext_both), 1)
+            self.assertEqual(ext_both[0].name, "report (2).txt")
+            self.assertEqual(ext_both[0].read_text(encoding="utf-8"), "Версия 3 (обновлённая)")
+
+            # Режим replace: атомарно заменяет report.txt на диске после проверки целостности
+            ext_repl = vault.extract_entries(["report.txt"], ext_partial, on_conflict="replace")
+            self.assertEqual(len(ext_repl), 1)
+            self.assertEqual(existing_report.read_text(encoding="utf-8"), "Версия 3 (обновлённая)")
+
 
     def test_translations_completeness_and_gtk_window_settings_apply(self) -> None:
         ru_keys = set(TRANSLATIONS["ru"].keys())

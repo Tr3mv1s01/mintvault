@@ -72,6 +72,7 @@ from .fs_utils import (
     collect_source_items,
     ensure_safe_directory_tree,
     fsync_directory,
+    make_unique_disk_path,
     normalize_virtual_path,
     open_safe_regular_file_for_read,
     resolve_safe_extraction_path,
@@ -1092,6 +1093,58 @@ class SecureVault:
             logger.info("Из хранилища удалено объектов: %d", len(to_delete_keys))
             return len(to_delete_keys)
 
+    def find_extraction_conflicts(
+        self,
+        virtual_paths: List[str],
+        destination_dir: str | Path,
+        preserve_structure: bool = True,
+    ) -> List[Path]:
+        """
+        Проверяет выбранные для извлечения объекты и возвращает список путей файлов в папке назначения,
+        которые уже существуют на диске.
+        Существующие на диске обычные папки конфликтом не считаются (в них можно дописывать файлы).
+        """
+        with self._lock:
+            self._require_unlocked()
+            raw_dest = Path(destination_dir)
+            if raw_dest.is_symlink():
+                raise PathTraversalError(f"Целевой каталог не может быть символической ссылкой: {destination_dir}")
+            dest_root = raw_dest.resolve()
+            if not dest_root.exists() or not dest_root.is_dir():
+                raise FileNotFoundError(f"Целевой каталог для извлечения не найден: {dest_root}")
+
+            norm_targets = [normalize_virtual_path(p) for p in virtual_paths]
+            conflicts: List[Path] = []
+            seen_vp: set[str] = set()
+            seen_conflicts: set[Path] = set()
+
+            for target in norm_targets:
+                matched = [
+                    e for vp, e in sorted(self._entries.items())
+                    if vp == target or vp.startswith(target + "/")
+                ]
+                parent_prefix = posixpath_dirname(target)
+                for entry in matched:
+                    if entry.virtual_path in seen_vp:
+                        continue
+                    seen_vp.add(entry.virtual_path)
+                    if preserve_structure or not parent_prefix:
+                        rel_out = entry.virtual_path
+                    else:
+                        rel_out = entry.virtual_path[len(parent_prefix) :].lstrip("/")
+                    out_path = resolve_safe_extraction_path(dest_root, rel_out, allow_existing=True)
+                    try:
+                        st = os.lstat(str(out_path))
+                        # Если мы извлекаем папку и на диске уже есть обычная папка — это не конфликт
+                        if entry.entry_type == "dir" and stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode):
+                            continue
+                        if out_path not in seen_conflicts:
+                            seen_conflicts.add(out_path)
+                            conflicts.append(out_path)
+                    except FileNotFoundError:
+                        pass
+            return conflicts
+
     def extract_entries(
         self,
         virtual_paths: List[str],
@@ -1099,17 +1152,19 @@ class SecureVault:
         preserve_structure: bool = True,
         cancel_check: Optional[Callable[[], bool]] = None,
         progress_cb: Optional[Callable[[int, int, str], None]] = None,
+        on_conflict: str = "error",
     ) -> List[Path]:
         """
         Извлекает и расшифровывает выбранные объекты (файлы и папки) в указанный пользователем каталог.
-        Гарантирует:
-        - Защиту от обхода каталогов (Path Traversal) и подмены промежуточных папок симлинками.
-        - Строгий запрет перезаписи уже существующих файлов на диске (через `os.link` + `os.unlink`).
-        - Проверку отсутствия коллизий целевых имён до начала записи.
-        - Проверку свободного места до начала извлечения.
-        - Потоковую расшифровку во временный файл с полной проверкой AEAD-тегов и SHA-256
-          до публикации под финальным именем файла (повреждённые данные никогда не остаются под видом исправного файла).
+        Поддерживает режимы `on_conflict`:
+        - 'error' (по умолчанию): запрещает перезапись существующих файлов (выбрасывает `FileOverwriteError`).
+        - 'skip': пропускает уже существующие на диске файлы и выгружает только недостающие.
+        - 'keep_both': сохраняет конфликтующий файл рядом под новым именем вида `файл (1).ext`.
+        - 'replace': расшифровывает и проверяет файл во временный файл, после чего атомарно заменяет существующий файл.
         """
+        if on_conflict not in ("error", "skip", "keep_both", "replace"):
+            raise ValueError(f"Недопустимый режим разрешения конфликтов при извлечении: {on_conflict}")
+
         with self._lock:
             self._require_unlocked()
             assert self._master_key is not None
@@ -1142,29 +1197,74 @@ class SecureVault:
                         rel_out = entry.virtual_path[len(parent_prefix) :].lstrip("/")
                     selected_entries.append((entry, rel_out))
 
-            # Убираем дубликаты virtual_path и проверяем коллизии выходных путей out_path
-            unique_plan: List[Tuple[VaultEntry, Path]] = []
+            unique_plan: List[Tuple[VaultEntry, Path, bool]] = []
             seen_vp: set[str] = set()
             seen_out_paths: Dict[Path, VaultEntry] = {}
+            reserved_paths: set[Path] = set()
             total_bytes_to_extract = 0
 
             for entry, rel_out in selected_entries:
                 if entry.virtual_path in seen_vp:
                     continue
                 seen_vp.add(entry.virtual_path)
-                out_path = resolve_safe_extraction_path(dest_root, rel_out)
-                if out_path in seen_out_paths:
-                    prev_entry = seen_out_paths[out_path]
-                    if not (prev_entry.entry_type == "dir" and entry.entry_type == "dir"):
-                        raise FileOverwriteError(
-                            f"Конфликт имён при извлечении: объекты '{prev_entry.virtual_path}' "
-                            f"и '{entry.virtual_path}' указывают на один целевой путь '{out_path}'."
-                        )
+                out_path = resolve_safe_extraction_path(dest_root, rel_out, allow_existing=True)
+
+                if entry.entry_type == "dir":
+                    try:
+                        st_existing = os.lstat(str(out_path))
+                        if not stat.S_ISDIR(st_existing.st_mode):
+                            if on_conflict == "skip":
+                                continue
+                            raise FileOverwriteError(
+                                f"Невозможно создать каталог, путь занят файлом: {out_path}"
+                            )
+                    except FileNotFoundError:
+                        pass
+                    seen_out_paths[out_path] = entry
+                    reserved_paths.add(out_path)
+                    unique_plan.append((entry, out_path, False))
                     continue
+
+                # Обработка файла (entry.entry_type == "file")
+                disk_exists = False
+                try:
+                    st_existing = os.lstat(str(out_path))
+                    disk_exists = True
+                    if stat.S_ISDIR(st_existing.st_mode):
+                        if on_conflict == "skip":
+                            continue
+                        elif on_conflict == "keep_both":
+                            out_path = make_unique_disk_path(out_path, reserved_paths)
+                            disk_exists = False
+                        else:
+                            raise FileOverwriteError(
+                                f"Целевой путь '{out_path}' занят существующим каталогом."
+                            )
+                except FileNotFoundError:
+                    disk_exists = False
+
+                in_plan_conflict = out_path in seen_out_paths
+
+                if disk_exists or in_plan_conflict:
+                    if on_conflict == "error":
+                        raise FileOverwriteError(
+                            f"Целевой объект уже существует и не будет перезаписан: {out_path}"
+                        )
+                    elif on_conflict == "skip":
+                        continue
+                    elif on_conflict == "keep_both":
+                        out_path = make_unique_disk_path(out_path, reserved_paths)
+                        disk_exists = False
+                    elif on_conflict == "replace":
+                        if in_plan_conflict:
+                            raise FileOverwriteError(
+                                f"Конфликт имён внутри одного задания извлечения: {out_path}"
+                            )
+
                 seen_out_paths[out_path] = entry
-                if entry.entry_type == "file":
-                    total_bytes_to_extract += entry.size
-                unique_plan.append((entry, out_path))
+                reserved_paths.add(out_path)
+                total_bytes_to_extract += entry.size
+                unique_plan.append((entry, out_path, disk_exists and on_conflict == "replace"))
 
             check_disk_space(dest_root, total_bytes_to_extract)
 
@@ -1173,7 +1273,7 @@ class SecureVault:
 
             fp, _ = open_safe_regular_file_for_read(self.vault_path)
             with fp as vault_fp:
-                for entry, out_path in unique_plan:
+                for entry, out_path, allow_replace_existing in unique_plan:
                     if cancel_check and cancel_check():
                         raise OperationCancelledError("Извлечение файлов отменено пользователем.")
 
@@ -1182,17 +1282,17 @@ class SecureVault:
                         extracted_paths.append(out_path)
                         continue
 
-                    # Безопасно создаём родительские каталоги с проверкой отсутствия симлинков на каждом шаге
                     ensure_safe_directory_tree(dest_root, out_path.parent, mode=0o755)
                     verify_no_symlink_components(dest_root, out_path)
 
-                    try:
-                        os.lstat(str(out_path))
-                        raise FileOverwriteError(
-                            f"Целевой файл уже существует и не будет перезаписан: {out_path}"
-                        )
-                    except FileNotFoundError:
-                        pass
+                    if not allow_replace_existing:
+                        try:
+                            os.lstat(str(out_path))
+                            raise FileOverwriteError(
+                                f"Целевой файл уже существует и не будет перезаписан: {out_path}"
+                            )
+                        except FileNotFoundError:
+                            pass
 
                     tmp_extract_path = (
                         out_path.parent / f".{out_path.name}.mvault_extract.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
@@ -1225,7 +1325,20 @@ class SecureVault:
                         verify_no_symlink_components(dest_root, out_path)
                         os.chmod(str(tmp_extract_path), entry.mode & 0o666 or 0o600)
                         os.utime(str(tmp_extract_path), (entry.mtime, entry.mtime))
-                        atomic_publish_extracted_file(tmp_extract_path, out_path)
+
+                        if allow_replace_existing:
+                            try:
+                                st_now = os.lstat(str(out_path))
+                                if stat.S_ISLNK(st_now.st_mode) or stat.S_ISDIR(st_now.st_mode):
+                                    raise PathTraversalError(
+                                        f"Небезопасный целевой объект для замены: {out_path}"
+                                    )
+                            except FileNotFoundError:
+                                pass
+                            os.replace(str(tmp_extract_path), str(out_path))
+                        else:
+                            atomic_publish_extracted_file(tmp_extract_path, out_path)
+
                         fsync_directory(out_path.parent)
                         extracted_paths.append(out_path)
                         bytes_done += entry.size

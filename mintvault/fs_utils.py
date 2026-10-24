@@ -266,12 +266,43 @@ def atomic_publish_extracted_file(tmp_path: Path, final_path: Path) -> None:
     os.replace(str(tmp_path), str(final_path))
 
 
-def resolve_safe_extraction_path(dest_root: str | Path, target_rel_path: str) -> Path:
+def make_unique_disk_path(candidate: Path, reserved_paths: Optional[set[Path]] = None) -> Path:
+    """
+    Подбирает свободное имя файла на диске вида 'IMG_4687 (1).MOV', 'IMG_4687 (2).MOV',
+    не перезаписывая существующие файлы.
+    """
+    parent = candidate.parent
+    stem, ext = os.path.splitext(candidate.name)
+    if not stem:
+        stem, ext = candidate.name, ""
+    counter = 1
+    while True:
+        suffix = f" ({counter})"
+        max_stem_bytes = 250 - len(suffix.encode("utf-8")) - len(ext.encode("utf-8"))
+        stem_bytes = stem.encode("utf-8")
+        if len(stem_bytes) > max_stem_bytes:
+            stem = stem_bytes[:max_stem_bytes].decode("utf-8", errors="ignore")
+        alt = parent / f"{stem}{suffix}{ext}"
+        if reserved_paths is not None and alt in reserved_paths:
+            counter += 1
+            continue
+        try:
+            os.lstat(str(alt))
+            counter += 1
+        except FileNotFoundError:
+            return alt
+
+
+def resolve_safe_extraction_path(
+    dest_root: str | Path,
+    target_rel_path: str,
+    allow_existing: bool = False,
+) -> Path:
     """
     Безопасно вычисляет целевой путь на диске для извлечения объекта из хранилища.
     Защищает от Path Traversal (обхода каталогов) и проверяет, что ни один промежуточный
     компонент внутри dest_root не является символической ссылкой.
-    Также проверяет отсутствие существующего файла (защита от перезаписи).
+    Если `allow_existing=False` (по умолчанию), также проверяет отсутствие целевого объекта на диске.
     """
     norm_rel = normalize_virtual_path(target_rel_path)
     raw_root = Path(dest_root)
@@ -291,12 +322,16 @@ def resolve_safe_extraction_path(dest_root: str | Path, target_rel_path: str) ->
 
     verify_no_symlink_components(root_path, candidate)
 
-    # Проверяем, что сам целевой путь не существует (включая разорванные симлинки)
     try:
-        os.lstat(str(candidate))
-        raise FileOverwriteError(
-            f"Целевой объект уже существует и не будет перезаписан: {candidate}"
-        )
+        st_cand = os.lstat(str(candidate))
+        if stat.S_ISLNK(st_cand.st_mode):
+            raise PathTraversalError(
+                f"Целевой путь '{candidate}' является символической ссылкой. Извлечение заблокировано."
+            )
+        if not allow_existing:
+            raise FileOverwriteError(
+                f"Целевой объект уже существует и не будет перезаписан: {candidate}"
+            )
     except FileNotFoundError:
         pass
 

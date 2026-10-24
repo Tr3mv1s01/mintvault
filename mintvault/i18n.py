@@ -308,6 +308,17 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "btn_dup_keep_both": "Сделать копию (оставить оба)",
         "btn_dup_skip": "Пропустить существующие",
         "status_added_skipped": "Операция завершена: все выбранные файлы уже были в хранилище и пропущены.",
+        "settings_lbl_ext_action": "Если при извлечении файл уже есть в папке назначения:",
+        "dlg_ext_conflict_title": "Файлы уже существуют в папке назначения",
+        "dlg_ext_conflict_body": (
+            "В целевой папке уже существуют следующие файлы ({count} шт.):\n\n"
+            "{preview}\n\n"
+            "Как поступить с уже существующими на диске файлами?"
+        ),
+        "btn_ext_skip": "Пропустить существующие (докачать остальные)",
+        "btn_ext_keep_both": "Сделать копию (оставить оба)",
+        "btn_ext_replace": "Заменить файлы на диске",
+        "status_extracted_all_skipped": "Извлечение завершено: все выбранные файлы уже существуют в папке назначения (пропущены).",
         "unit_b": "Б",
         "unit_kb": "КБ",
         "unit_mb": "МБ",
@@ -615,6 +626,17 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "btn_dup_keep_both": "Keep Both (Make Copy)",
         "btn_dup_skip": "Skip Existing",
         "status_added_skipped": "Operation complete: all selected files already existed in vault and were skipped.",
+        "settings_lbl_ext_action": "When extracting a file that already exists in destination folder:",
+        "dlg_ext_conflict_title": "Files Already Exist in Destination Folder",
+        "dlg_ext_conflict_body": (
+            "The following files ({count}) already exist in the destination folder:\n\n"
+            "{preview}\n\n"
+            "How would you like to handle the existing files on disk?"
+        ),
+        "btn_ext_skip": "Skip Existing (Extract Remaining)",
+        "btn_ext_keep_both": "Keep Both (Make Copy)",
+        "btn_ext_replace": "Replace Files on Disk",
+        "status_extracted_all_skipped": "Extraction complete: all selected files already exist in destination folder (skipped).",
         "unit_b": "B",
         "unit_kb": "KB",
         "unit_mb": "MB",
