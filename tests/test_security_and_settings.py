@@ -610,6 +610,13 @@ class TestSettingsOriginalsAndGuiLocalization(unittest.TestCase):
         self.assertIn("B", format_size_localized(100, "en"))
         self.assertIn("КБ", format_size_localized(2048, "ru"))
         self.assertIn("KB", format_size_localized(2048, "en"))
+        # Проверяем, что Gtk.ListStore принимает файлы > 2 ГБ (например, 2.5 ГБ и 62 ГБ) без OverflowError
+        from gi.repository import GObject, Gtk
+        store = Gtk.ListStore(str, str, str, str, str, str, GObject.TYPE_INT64)
+        store.append(["win11.iso", "📄 Файл", "win11.iso", "2.3 ГБ", "24.10.2026", "abcd...", 2510861186])
+        store.append(["huge_62gb.bin", "📄 Файл", "huge_62gb.bin", "62.0 ГБ", "24.10.2026", "ef01...", 62 * 1024 * 1024 * 1024])
+        self.assertEqual(len(store), 2)
+
 
         from mintvault.gui import MintVaultWindow
         import gi

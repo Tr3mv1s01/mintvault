@@ -25,7 +25,7 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk, Pango
+from gi.repository import Gdk, GLib, GObject, Gtk, Pango
 
 from . import __app_name__, __version__
 from .exceptions import (
@@ -745,7 +745,7 @@ class MintVaultWindow(Gtk.Window):
         vbox.pack_start(self.content_stack, True, True, 0)
 
         # Таблица (TreeView) для отображения содержимого хранилища
-        self.list_store = Gtk.ListStore(str, str, str, str, str, str, int)
+        self.list_store = Gtk.ListStore(str, str, str, str, str, str, GObject.TYPE_INT64)
         self.tree_view = Gtk.TreeView(model=self.list_store)
         self.tree_view.set_headers_visible(True)
         self.tree_view.set_enable_search(True)
