@@ -1270,6 +1270,7 @@ class SecureVault:
 
             extracted_paths: List[Path] = []
             bytes_done = 0
+            dirs_to_fsync: set[Path] = set()
 
             fp, _ = open_safe_regular_file_for_read(self.vault_path)
             with fp as vault_fp:
@@ -1279,6 +1280,7 @@ class SecureVault:
 
                     if entry.entry_type == "dir":
                         ensure_safe_directory_tree(dest_root, out_path, mode=entry.mode & 0o777 or 0o755)
+                        dirs_to_fsync.add(out_path)
                         extracted_paths.append(out_path)
                         continue
 
@@ -1320,7 +1322,6 @@ class SecureVault:
                                 progress_cb=_file_progress,
                             )
                             dst_fp.flush()
-                            os.fsync(dst_fp.fileno())
 
                         verify_no_symlink_components(dest_root, out_path)
                         os.chmod(str(tmp_extract_path), entry.mode & 0o666 or 0o600)
@@ -1339,7 +1340,7 @@ class SecureVault:
                         else:
                             atomic_publish_extracted_file(tmp_extract_path, out_path)
 
-                        fsync_directory(out_path.parent)
+                        dirs_to_fsync.add(out_path.parent)
                         extracted_paths.append(out_path)
                         bytes_done += entry.size
                     except Exception:
@@ -1349,6 +1350,9 @@ class SecureVault:
                             except OSError:
                                 pass
                         raise
+            # Один fsync на каждую уникальную папку в конце (batch-режим)
+            for d in dirs_to_fsync:
+                fsync_directory(d)
 
             return extracted_paths
 

@@ -25,10 +25,10 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from .exceptions import AuthenticationError, IntegrityError, OperationCancelledError
 from .models import KDFParams, WrappedKeySlot
 
-# Размер одного блока при потоковом шифровании больших файлов (256 КиБ)
-DEFAULT_CHUNK_SIZE = 256 * 1024
+# Размер одного блока при потоковом шифровании больших файлов (4 МиБ)
+DEFAULT_CHUNK_SIZE = 4 * 1024 * 1024
 # Верхний предел размера одного чанка при расшифровке (защита от OOM DoS при повреждённом заголовке чанка)
-MAX_CHUNK_SIZE = 4 * 1024 * 1024
+MAX_CHUNK_SIZE = 8 * 1024 * 1024
 
 AES_GCM_NONCE_SIZE = 12
 AES_GCM_TAG_SIZE = 16
