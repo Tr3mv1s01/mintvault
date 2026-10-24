@@ -1,21 +1,308 @@
-MIT License
+# Tr3mv1s01 Modified License (TML)
+## Version 1.0 — 2026
 
 Copyright (c) 2026 Tr3mv1s01
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+All rights reserved except as expressly granted below.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+# English Version
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+## 1. Definitions
+
+“Licensor” means Tr3mv1s01 and any other person or entity that holds the relevant copyright and expressly grants rights under this License.
+
+“Software” means the software, source code, object code, documentation, and other materials accompanied by this License or expressly identified as being licensed under it.
+
+“Modified Version” means the Software or a work based on it that has been altered, adapted, translated, or extended.
+
+“Source Code” means the preferred form of the Software for making modifications, including the source files and the scripts or other materials reasonably necessary to modify and build it.
+
+“Commercial Use” means use primarily intended for or directed toward commercial advantage, monetary compensation, or business activity. Examples include selling the Software, offering paid access or services based on it, incorporating it into a paid product, and using it to provide paid services. Whether a particular activity constitutes Commercial Use depends on its circumstances and applicable law.
+
+“Distribution” means making the Software or a Modified Version available to another person or the public, including by publishing, transferring, or providing copies.
+
+## 2. Grant of License
+
+Subject to compliance with this License, the Licensor grants you a worldwide, non-exclusive, royalty-free license to:
+
+a. use and run the unmodified Software for lawful, non-commercial purposes;
+
+b. study and modify the Software for personal and non-commercial purposes;
+
+c. create Modified Versions for personal and non-commercial use;
+
+d. redistribute unmodified copies of the Software without charge, provided that all applicable conditions of this License are met; and
+
+e. distribute Modified Versions solely under the conditions set out in Section 4.
+
+This License does not transfer ownership of the Software or its intellectual property to you.
+
+## 3. Restrictions on Commercial Use
+
+Commercial Use is prohibited unless the Licensor has granted prior written authorization through a separate license agreement.
+
+Without such an agreement, you must not:
+
+a. sell the Software or copies of it;
+
+b. sell, license for a fee, or commercially exploit a Modified Version;
+
+c. offer paid access to the Software or a service whose commercial operation is based on the Software;
+
+d. incorporate the Software into a commercial product or service; or
+
+e. otherwise use the Software primarily for commercial advantage or monetary compensation.
+
+A separate license agreement may establish its own scope, fees, duration, and other conditions.
+
+Nothing in this Section prohibits activity that cannot lawfully be restricted under applicable mandatory law.
+
+## 4. Distribution and Share-Alike Requirements
+
+You may distribute the Software or a Modified Version only if all of the following conditions are satisfied:
+
+a. You provide recipients with a complete copy of this License.
+
+b. You preserve all existing copyright notices, the name Tr3mv1s01 where included in the original notices, and notices identifying this License.
+
+c. You clearly identify the changes you made and, where reasonably practicable, the date of those changes.
+
+d. You make the complete corresponding Source Code of the distributed Modified Version available to recipients, including your modifications and the materials reasonably necessary to build the distributed version.
+
+e. You distribute the Modified Version under this License, without removing or weakening its applicable restrictions.
+
+f. You do not impose additional restrictions that prevent recipients from exercising the rights expressly granted by this License.
+
+g. You do not charge for the Software, a Modified Version, or access to either unless separately authorized by a written commercial license agreement.
+
+You may not distribute a closed-source Modified Version. You may, however, keep a Modified Version private for your own lawful, non-commercial use, subject to applicable law.
+
+## 5. Attribution and Notices
+
+You must not remove, obscure, or alter existing copyright notices, license notices, or other legally required attribution notices included with the Software.
+
+The name Tr3mv1s01 and the original copyright notice must remain in the locations in which they are provided in the Software or its accompanying materials, to the extent reasonably practicable.
+
+You must clearly distinguish your own modifications from the original Software so that your changes are not misrepresented as the work of the original author.
+
+This Section does not require you to claim that the Licensor endorses, supports, or is affiliated with your Modified Version.
+
+## 6. Names, Logos, and Trademarks
+
+This License does not grant any right to use the name Tr3mv1s01, any logo, or any trademark of the Licensor to market, endorse, or promote a Modified Version without separate written permission.
+
+You may make factual references to the original Software and its author when reasonably necessary to comply with this License, describe compatibility, or identify the origin of the Software, provided that you do not imply endorsement or affiliation.
+
+Any rights in names, logos, and trademarks remain with their respective owners.
+
+## 7. Separate Commercial Agreements
+
+The Licensor may grant additional permissions, including Commercial Use, through a separate written license agreement.
+
+Such an agreement applies only within its stated scope and does not automatically amend this License for other recipients or versions of the Software.
+
+Unless expressly stated in writing by the relevant rights holder, no commercial permission may be inferred from silence, prior conduct, publication, or the availability of the Software.
+
+## 8. Termination
+
+Any permission granted under this License terminates automatically when you materially violate its terms, to the extent permitted by applicable law.
+
+Upon termination, you must cease the activities for which permission has terminated and stop further distribution that is not authorized.
+
+Your permissions may be reinstated if you fully remedy the violation and satisfy any reasonable conditions communicated by the Licensor in writing, subject to applicable law.
+
+Termination does not eliminate rights or remedies that accrued before termination, nor does it override mandatory legal protections.
+
+## 9. No Warranty
+
+THE SOFTWARE IS PROVIDED “AS IS” AND “AS AVAILABLE”, WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING, WITHOUT LIMITATION, WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT, TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW.
+
+THE LICENSOR DOES NOT WARRANT THAT THE SOFTWARE WILL BE ERROR-FREE, SECURE, AVAILABLE, OR SUITABLE FOR ANY PARTICULAR USE.
+
+## 10. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSOR SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES, OR FOR LOSS OF DATA, PROFITS, REVENUE, OR BUSINESS, ARISING OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THIS LICENSE.
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSOR DISCLAIMS LIABILITY FOR DIRECT DAMAGES ARISING FROM THE USE OR INABILITY TO USE THE SOFTWARE.
+
+Nothing in this License excludes or limits liability that cannot lawfully be excluded or limited under applicable law.
+
+## 11. Intellectual Property and Patents
+
+Except for the limited rights expressly granted in this License, no additional intellectual property rights are granted or transferred.
+
+No patent license is expressly or implicitly granted under this License, except to the extent such a license cannot be excluded under applicable law.
+
+You are responsible for ensuring that your use and distribution of the Software comply with applicable law and do not infringe third-party rights.
+
+## 12. Applicable Law and Territorial Scope
+
+This License is intended to apply worldwide, subject to mandatory provisions of applicable law.
+
+Nothing in this License requires a court or authority to disregard mandatory legal protections or rules that apply to a particular person, transaction, or jurisdiction.
+
+## 13. Severability
+
+If any provision of this License is found invalid or unenforceable, that provision shall be interpreted or limited to the minimum extent necessary where permitted by law. The remaining provisions shall continue in effect to the extent legally possible.
+
+## 14. Entire License
+
+This document sets out the terms under which the Licensor grants the rights described above.
+
+Any additional or different commercial permissions must be expressly agreed in a separate written license agreement by the relevant rights holder.
+
+---
+
+# Русская версия
+
+## 1. Определения
+
+«Лицензиар» — Tr3mv1s01, а также любое другое физическое или юридическое лицо, обладающее соответствующими авторскими правами и прямо предоставляющее права по настоящей Лицензии.
+
+«Программное обеспечение» — программа, исходный и объектный код, документация и другие материалы, сопровождаемые настоящей Лицензией либо прямо обозначенные как распространяемые на её условиях.
+
+«Изменённая версия» — Программное обеспечение или основанное на нём произведение, которое было изменено, адаптировано, переведено или расширено.
+
+«Исходный код» — предпочтительная форма Программного обеспечения для внесения изменений, включая исходные файлы, скрипты и другие материалы, разумно необходимые для изменения и сборки программы.
+
+«Коммерческое использование» — использование, преимущественно направленное на получение коммерческой выгоды, денежного вознаграждения или осуществление предпринимательской деятельности. Примеры включают продажу Программного обеспечения, предоставление платного доступа или услуг на его основе, включение в платный продукт и использование для оказания платных услуг. Отнесение конкретной деятельности к Коммерческому использованию зависит от обстоятельств и применимого законодательства.
+
+«Распространение» — предоставление Программного обеспечения или Изменённой версии другому лицу либо публике, включая публикацию, передачу или предоставление копий.
+
+## 2. Предоставление лицензии
+
+При соблюдении условий настоящей Лицензии Лицензиар предоставляет вам всемирное, неисключительное и безвозмездное разрешение:
+
+a. использовать и запускать неизменённое Программное обеспечение в законных некоммерческих целях;
+
+b. изучать и изменять Программное обеспечение для личных и некоммерческих целей;
+
+c. создавать Изменённые версии для личного и некоммерческого использования;
+
+d. распространять неизменённые копии Программного обеспечения бесплатно при соблюдении всех применимых условий настоящей Лицензии;
+
+e. распространять Изменённые версии исключительно на условиях раздела 4.
+
+Настоящая Лицензия не передаёт вам право собственности на Программное обеспечение или права интеллектуальной собственности на него.
+
+## 3. Ограничения коммерческого использования
+
+Коммерческое использование запрещено, если Лицензиар предварительно не предоставил письменное разрешение посредством отдельного лицензионного договора.
+
+Без такого договора запрещается:
+
+a. продавать Программное обеспечение или его копии;
+
+b. продавать Изменённую версию, предоставлять её за плату или иным образом извлекать из неё коммерческую выгоду;
+
+c. предоставлять платный доступ к Программному обеспечению или услугу, коммерческая деятельность которой основана на нём;
+
+d. включать Программное обеспечение в коммерческий продукт или услугу;
+
+e. иным образом использовать Программное обеспечение преимущественно для получения коммерческой выгоды или денежного вознаграждения.
+
+Отдельный лицензионный договор может устанавливать собственную область разрешённого использования, размер платы, срок действия и другие условия.
+
+Настоящий раздел не запрещает действия, которые не могут быть законно ограничены в силу обязательных норм применимого законодательства.
+
+## 4. Распространение и обязательное сохранение условий
+
+Вы вправе распространять Программное обеспечение или Изменённую версию только при соблюдении всех следующих условий:
+
+a. Получателям предоставляется полный текст настоящей Лицензии.
+
+b. Сохраняются все существующие уведомления об авторских правах, имя Tr3mv1s01 в составе исходных уведомлений и уведомления о настоящей Лицензии.
+
+c. Внесённые изменения чётко обозначаются; по возможности указывается дата их внесения.
+
+d. Получателям предоставляется полный соответствующий Исходный код распространяемой Изменённой версии, включая внесённые изменения и материалы, разумно необходимые для сборки распространяемой версии.
+
+e. Изменённая версия распространяется на условиях настоящей Лицензии без удаления или ослабления применимых ограничений.
+
+f. Не вводятся дополнительные ограничения, препятствующие получателям осуществлять права, прямо предоставленные настоящей Лицензией.
+
+g. Не взимается плата за Программное обеспечение, Изменённую версию или доступ к ним, если иное отдельно не разрешено письменным коммерческим лицензионным договором.
+
+Распространение Изменённой версии с закрытым исходным кодом запрещено. При этом вы вправе сохранять Изменённую версию закрытой для собственного законного некоммерческого использования с учётом применимого законодательства.
+
+## 5. Авторство и уведомления
+
+Запрещается удалять, скрывать или изменять существующие уведомления об авторских правах, лицензии и другие обязательные уведомления об авторстве, включённые в Программное обеспечение.
+
+Имя Tr3mv1s01 и первоначальное уведомление об авторских правах должны сохраняться в тех местах, в которых они размещены в Программном обеспечении или сопровождающих материалах, насколько это разумно осуществимо.
+
+Необходимо чётко отличать собственные изменения от оригинального Программного обеспечения, чтобы не выдавать изменённый код за работу первоначального автора.
+
+Настоящий раздел не обязывает утверждать, что Лицензиар одобряет, поддерживает или связан с вашей Изменённой версией.
+
+## 6. Имена, логотипы и товарные знаки
+
+Настоящая Лицензия не предоставляет права использовать имя Tr3mv1s01, какие-либо логотипы или товарные знаки Лицензиара для продвижения, рекламы или подтверждения одобрения Изменённой версии без отдельного письменного разрешения.
+
+Допускаются фактические упоминания оригинального Программного обеспечения и его автора, разумно необходимые для соблюдения настоящей Лицензии, описания совместимости или указания происхождения программы, при условии, что они не создают впечатления одобрения или аффилированности.
+
+Все права на имена, логотипы и товарные знаки сохраняются за соответствующими правообладателями.
+
+## 7. Отдельные коммерческие договоры
+
+Лицензиар вправе предоставлять дополнительные разрешения, включая Коммерческое использование, посредством отдельного письменного лицензионного договора.
+
+Такой договор действует только в пределах прямо установленных им условий и автоматически не изменяет настоящую Лицензию для других получателей или версий Программного обеспечения.
+
+Если соответствующий правообладатель прямо не согласовал иное в письменной форме, коммерческое разрешение не может подразумеваться из молчания, предыдущего поведения, публикации или доступности Программного обеспечения.
+
+## 8. Прекращение действия разрешений
+
+Любое разрешение, предоставленное настоящей Лицензией, автоматически прекращается при существенном нарушении её условий в пределах, допускаемых применимым законодательством.
+
+После прекращения разрешения вы обязаны прекратить действия, на которые оно распространялось, и дальнейшее распространение, не имеющее разрешения.
+
+Разрешения могут быть восстановлены после полного устранения нарушения и выполнения разумных условий, письменно сообщённых Лицензиаром, с учётом применимого законодательства.
+
+Прекращение разрешения не отменяет права и средства правовой защиты, возникшие до прекращения, и не отменяет обязательные правовые гарантии.
+
+## 9. Отказ от гарантий
+
+ПРОГРАММНОЕ ОБЕСПЕЧЕНИЕ ПРЕДОСТАВЛЯЕТСЯ «КАК ЕСТЬ» И «ПО МЕРЕ ДОСТУПНОСТИ», БЕЗ КАКИХ-ЛИБО ГАРАНТИЙ, ЯВНЫХ ИЛИ ПОДРАЗУМЕВАЕМЫХ, ВКЛЮЧАЯ, ПОМИМО ПРОЧЕГО, ГАРАНТИИ ТОВАРНОЙ ПРИГОДНОСТИ, ПРИГОДНОСТИ ДЛЯ КОНКРЕТНОЙ ЦЕЛИ, НАЛИЧИЯ ПРАВ И НЕНАРУШЕНИЯ ПРАВ ТРЕТЬИХ ЛИЦ, В МАКСИМАЛЬНОЙ СТЕПЕНИ, ДОПУСКАЕМОЙ ПРИМЕНИМЫМ ЗАКОНОДАТЕЛЬСТВОМ.
+
+ЛИЦЕНЗИАР НЕ ГАРАНТИРУЕТ, ЧТО ПРОГРАММНОЕ ОБЕСПЕЧЕНИЕ БУДЕТ РАБОТАТЬ БЕЗ ОШИБОК, БУДЕТ БЕЗОПАСНЫМ, ДОСТУПНЫМ ИЛИ ПОДХОДЯЩИМ ДЛЯ КАКОЙ-ЛИБО КОНКРЕТНОЙ ЦЕЛИ.
+
+## 10. Ограничение ответственности
+
+В МАКСИМАЛЬНОЙ СТЕПЕНИ, ДОПУСКАЕМОЙ ПРИМЕНИМЫМ ЗАКОНОДАТЕЛЬСТВОМ, ЛИЦЕНЗИАР НЕ НЕСЁТ ОТВЕТСТВЕННОСТИ ЗА КОСВЕННЫЕ, СЛУЧАЙНЫЕ, СПЕЦИАЛЬНЫЕ, ШТРАФНЫЕ ИЛИ ПОСЛЕДУЮЩИЕ УБЫТКИ, А ТАКЖЕ ЗА ПОТЕРЮ ДАННЫХ, ПРИБЫЛИ, ДОХОДА ИЛИ ДЕЛОВЫХ ВОЗМОЖНОСТЕЙ, ВОЗНИКШИЕ В СВЯЗИ С ПРОГРАММНЫМ ОБЕСПЕЧЕНИЕМ ИЛИ НАСТОЯЩЕЙ ЛИЦЕНЗИЕЙ.
+
+В МАКСИМАЛЬНОЙ СТЕПЕНИ, ДОПУСКАЕМОЙ ПРИМЕНИМЫМ ЗАКОНОДАТЕЛЬСТВОМ, ЛИЦЕНЗИАР ИСКЛЮЧАЕТ ОТВЕТСТВЕННОСТЬ ЗА ПРЯМЫЕ УБЫТКИ, ВОЗНИКАЮЩИЕ В РЕЗУЛЬТАТЕ ИСПОЛЬЗОВАНИЯ ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ ИЛИ НЕВОЗМОЖНОСТИ ЕГО ИСПОЛЬЗОВАНИЯ.
+
+Ничто в настоящей Лицензии не исключает и не ограничивает ответственность, которую нельзя законно исключить или ограничить в соответствии с применимым законодательством.
+
+## 11. Интеллектуальная собственность и патенты
+
+За исключением ограниченных прав, прямо предоставленных настоящей Лицензией, никакие дополнительные права интеллектуальной собственности не предоставляются и не передаются.
+
+Настоящая Лицензия прямо или косвенно не предоставляет патентных лицензий, за исключением случаев, когда такое исключение невозможно в соответствии с применимым законодательством.
+
+Вы несёте ответственность за соблюдение применимого законодательства при использовании и распространении Программного обеспечения, а также за недопущение нарушения прав третьих лиц.
+
+## 12. Применимое право и территориальная область действия
+
+Настоящая Лицензия предназначена для применения во всём мире с учётом обязательных норм применимого законодательства.
+
+Ничто в настоящей Лицензии не требует от суда или компетентного органа игнорировать обязательные правовые гарантии или нормы, применимые к конкретному лицу, сделке или юрисдикции.
+
+## 13. Делимость положений
+
+Если какое-либо положение настоящей Лицензии будет признано недействительным или неисполнимым, оно должно быть истолковано или ограничено в минимально необходимой степени, если это допускается законом. Остальные положения сохраняют силу в максимально допустимой законом степени.
+
+## 14. Полнота лицензии
+
+Настоящий документ устанавливает условия предоставления Лицензиаром описанных выше прав.
+
+Любые дополнительные или отличающиеся коммерческие разрешения должны быть прямо согласованы в отдельном письменном лицензионном договоре с соответствующим правообладателем.
+
+---
+
+Copyright (c) 2026 Tr3mv1s01
+
+Tr3mv1s01 Modified License (TML), Version 1.0
+
+This license is an independently drafted license and is not an OSI-approved Open Source License.
