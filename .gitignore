@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Виртуальные окружения
+.venv/
+venv/
+env/
+
+# Сборки и упаковка
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Тесты и покрытие
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Данные приложения: хранилища и локальная конфигурация пользователя
+*.mvault
+.mintvault/
+*.mvault.tmp
+
+# Редакторы и ОС
+.vscode/
+.idea/
+*.swp
+.DS_Store
