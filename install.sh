@@ -31,14 +31,36 @@ from gi.repository import Gtk
     exit 1
 fi
 
-# 2. Копирование файлов приложения в пользовательский каталог
-echo "[2/4] Копирование файлов приложения в ${INSTALL_DIR}..."
+# 2. Подготовка новой версии отдельно, чтобы ошибка копирования не оставила
+# установленную программу наполовину обновлённой.
+echo "[2/4] Подготовка файлов приложения для ${INSTALL_DIR}..."
 mkdir -p "${INSTALL_DIR}" "${BIN_DIR}" "${DESKTOP_DIR}"
-rm -rf "${INSTALL_DIR}/mintvault"
-cp -r "${SCRIPT_DIR}/mintvault" "${INSTALL_DIR}/"
-cp "${SCRIPT_DIR}/requirements.txt" "${INSTALL_DIR}/"
-cp "${SCRIPT_DIR}/run_mintvault.sh" "${INSTALL_DIR}/"
-chmod 755 "${INSTALL_DIR}/run_mintvault.sh"
+STAGE_DIR="$(mktemp -d "${INSTALL_DIR}/.mintvault-update.XXXXXX")"
+BACKUP_DIR="${INSTALL_DIR}/.mintvault-previous.$$"
+cleanup() {
+    rm -rf "${STAGE_DIR}"
+    if [[ -d "${BACKUP_DIR}" && ! -d "${INSTALL_DIR}/mintvault" ]]; then
+        mv "${BACKUP_DIR}" "${INSTALL_DIR}/mintvault"
+    fi
+}
+trap cleanup EXIT
+cp -r "${SCRIPT_DIR}/mintvault" "${STAGE_DIR}/"
+cp "${SCRIPT_DIR}/requirements.txt" "${STAGE_DIR}/"
+cp "${SCRIPT_DIR}/run_mintvault.sh" "${STAGE_DIR}/"
+chmod 755 "${STAGE_DIR}/run_mintvault.sh"
+if [[ -e "${INSTALL_DIR}/mintvault" ]]; then
+    mv "${INSTALL_DIR}/mintvault" "${BACKUP_DIR}"
+fi
+if ! mv "${STAGE_DIR}/mintvault" "${INSTALL_DIR}/mintvault"; then
+    if [[ -d "${BACKUP_DIR}" ]]; then
+        mv "${BACKUP_DIR}" "${INSTALL_DIR}/mintvault"
+    fi
+    echo "ОШИБКА: Не удалось установить новую версию; предыдущая версия восстановлена." >&2
+    exit 1
+fi
+rm -rf "${BACKUP_DIR}"
+mv "${STAGE_DIR}/requirements.txt" "${INSTALL_DIR}/requirements.txt"
+mv "${STAGE_DIR}/run_mintvault.sh" "${INSTALL_DIR}/run_mintvault.sh"
 
 # 3. Создание исполняемой команды в ~/.local/bin/mintvault
 echo "[3/4] Создание стартового скрипта ${BIN_DIR}/mintvault..."

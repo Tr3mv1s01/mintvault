@@ -251,19 +251,17 @@ def atomic_publish_extracted_file(tmp_path: Path, final_path: Path) -> None:
             f"Целевой файл уже существует и не будет перезаписан: {final_path}"
         ) from exc
     except OSError as exc:
-        # Если целевая ФС не поддерживает жёсткие ссылки (например, FAT/exFAT: EPERM/ENOTSUP/EXDEV)
-        if exc.errno not in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EACCES):
-            raise
-
-    # Безопасный fallback для ФС без поддержки hardlinks:
-    try:
-        os.lstat(str(final_path))
-        raise FileOverwriteError(
-            f"Целевой файл уже существует и не будет перезаписан: {final_path}"
-        )
-    except FileNotFoundError:
-        pass
-    os.replace(str(tmp_path), str(final_path))
+        # Нет переносимого атомарного аналога link(..., EEXIST) в стандартной
+        # библиотеке. Не заменяем его lstat()+os.replace(): между вызовами
+        # может появиться пользовательский файл, который os.replace затрёт.
+        # При неподдерживаемых hardlink операция безопасно завершается ошибкой.
+        if exc.errno in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV):
+            raise OSError(
+                exc.errno,
+                "Файловая система не поддерживает безопасную публикацию без перезаписи",
+                str(final_path),
+            ) from exc
+        raise
 
 
 def make_unique_disk_path(candidate: Path, reserved_paths: Optional[set[Path]] = None) -> Path:
