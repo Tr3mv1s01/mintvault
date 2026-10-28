@@ -4,17 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mintvault"
-version = "1.0.0"
+version = "1.1.8"
 description = "Защищённое локальное хранилище секретных файлов для Linux Mint (AES-256-GCM + Argon2id, GTK 3)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = {file = "LICENSE"}
 authors = [
     {name = "MintVault Security Team"}
 ]
 dependencies = [
-    "cryptography>=38.0.0",
+    "cryptography>=38.0.0,<45.0.0",
 ]
 
 [project.scripts]
 mintvault = "mintvault.cli:main"
+
+[project.optional-dependencies]
+gui = ["PyGObject>=3.42.0,<4.0.0"]

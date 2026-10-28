@@ -5,7 +5,7 @@
 - Локальное хранение настроек в профиле пользователя Linux по стандарту XDG (`$XDG_CONFIG_HOME/mintvault/settings.json`).
 - Безопасные права доступа (`0700` на каталог, `0600` на файл конфигурации), защиту от симлинков (`os.O_NOFOLLOW`) и проверку владельца (`uid`).
 - Строгую валидацию каждого параметра при чтении и записи с безопасным откатом к значениям по умолчанию.
-- Атомарное сохранение через временный файл с `os.fsync` и `os.replace`.
+- Сохранение через временный файл, `os.fsync` и атомарный обмен с сохранением предыдущего объекта.
 - Полный запрет хранения паролей, ключей восстановления, мастер-ключей и любых секретных данных.
 """
 
@@ -80,7 +80,7 @@ class AppSettings:
     confirm_large_extraction: bool = True
     large_extraction_threshold: int = 10
     close_unlocked_action: str = "lock_and_close"  # "lock_and_close" | "ask"
-    auto_lock_minutes: int = 0  # 0 = выключено, 1..480 минут
+    auto_lock_minutes: int = 10  # 0 = выключено, 1..480 минут
     notify_long_operations: bool = True
     default_backup_dir: str = ""
 
@@ -236,7 +236,7 @@ def sanitize_and_validate_settings(raw_data: Any) -> Tuple[AppSettings, list[str
         MAX_AUTO_LOCK_MINUTES,
     )
     if not ok and "auto_lock_minutes" in raw_data:
-        warnings.append("Некорректное значение 'auto_lock_minutes'; автоблокировка выключена (0).")
+        warnings.append("Некорректное значение 'auto_lock_minutes'; использовано значение по умолчанию.")
 
     notify_long, ok = _validate_bool(
         raw_data.get("notify_long_operations", defaults.notify_long_operations),
@@ -275,7 +275,7 @@ def get_default_config_dir() -> Path:
     """
     override = os.environ.get("MINTVAULT_CONFIG_DIR", "").strip()
     if override:
-        return Path(override).expanduser().resolve()
+        return Path(override).expanduser().absolute()
 
     xdg_config = os.environ.get("XDG_CONFIG_HOME", "").strip()
     if xdg_config and os.path.isabs(xdg_config):
@@ -291,7 +291,7 @@ class SettingsManager:
     """
 
     def __init__(self, config_dir: Optional[str | Path] = None) -> None:
-        self.config_dir: Path = Path(config_dir).expanduser().resolve() if config_dir else get_default_config_dir()
+        self.config_dir: Path = Path(config_dir).expanduser().absolute() if config_dir else get_default_config_dir()
         self.config_file: Path = self.config_dir / "settings.json"
         self.last_warnings: list[str] = []
         self._settings: AppSettings = AppSettings()
@@ -305,16 +305,21 @@ class SettingsManager:
             raise PermissionError(f"Каталог настроек '{self.config_dir}' не может быть символической ссылкой.")
         if not self.config_dir.exists():
             self.config_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
-        st = os.lstat(str(self.config_dir))
-        if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-            raise PermissionError(f"Путь '{self.config_dir}' не является безопасным каталогом.")
-        if hasattr(os, "getuid") and st.st_uid != os.getuid():
-            raise PermissionError(f"Каталог настроек '{self.config_dir}' принадлежит другому пользователю.")
+        # Pin the directory before changing or checking permissions. A failure
+        # to make it private is a security error, not a cosmetic warning.
+        fd = os.open(str(self.config_dir), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
+            st = os.fstat(fd)
+            if not stat.S_ISDIR(st.st_mode):
+                raise PermissionError(f"Путь '{self.config_dir}' не является безопасным каталогом.")
+            if hasattr(os, "getuid") and st.st_uid != os.getuid():
+                raise PermissionError(f"Каталог настроек '{self.config_dir}' принадлежит другому пользователю.")
             if (st.st_mode & 0o077) != 0:
-                os.chmod(str(self.config_dir), 0o700)
-        except OSError:
-            pass
+                os.fchmod(fd, 0o700)
+                if os.fstat(fd).st_mode & 0o077:
+                    raise PermissionError(f"Не удалось закрыть доступ к каталогу настроек '{self.config_dir}'.")
+        finally:
+            os.close(fd)
 
     def load(self) -> AppSettings:
         """
@@ -354,10 +359,9 @@ class SettingsManager:
                 if not stat.S_ISREG(fst.st_mode) or fst.st_ino != st.st_ino:
                     raise PermissionError("Обнаружена подмена файла настроек при открытии.")
                 if (fst.st_mode & 0o077) != 0:
-                    try:
-                        os.fchmod(fd, 0o600)
-                    except OSError:
-                        pass
+                    os.fchmod(fd, 0o600)
+                    if os.fstat(fd).st_mode & 0o077:
+                        raise PermissionError("Не удалось закрыть доступ к файлу настроек.")
                 with os.fdopen(fd, "rb") as fp:
                     raw_bytes = fp.read(256 * 1024 + 1)
             except Exception:
@@ -375,28 +379,32 @@ class SettingsManager:
             if warnings:
                 try:
                     self.save(self._settings)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    self.last_warnings.append(f"Не удалось сохранить исправленные настройки: {exc}")
             return self._settings
 
         except Exception as exc:
             self.last_warnings.append(f"Файл настроек повреждён или некорректен ({exc}). Восстановлены безопасные значения.")
             logger.warning("Восстановление настроек по умолчанию из-за ошибки чтения конфигурации: %s", exc)
+            # Preserve the exact file under a new name before replacing it.
+            # Never unlink a symlink or overwrite an existing backup.
+            preserved = False
             try:
                 st_bad = os.lstat(str(self.config_file))
-                if stat.S_ISREG(st_bad.st_mode) and not stat.S_ISLNK(st_bad.st_mode):
-                    corrupt_bak = self.config_dir / f"settings.json.corrupt.{int(time.time())}.bak"
-                    os.replace(str(self.config_file), str(corrupt_bak))
-                elif stat.S_ISLNK(st_bad.st_mode):
-                    self.config_file.unlink()
-            except OSError:
-                pass
+                if stat.S_ISREG(st_bad.st_mode) and (not hasattr(os, "getuid") or st_bad.st_uid == os.getuid()):
+                    corrupt_bak = self.config_dir / f"settings.json.corrupt.{int(time.time())}.{uuid.uuid4().hex}.bak"
+                    os.link(str(self.config_file), str(corrupt_bak), follow_symlinks=False)
+                    fsync_directory(self.config_dir)
+                    preserved = True
+            except OSError as backup_error:
+                self.last_warnings.append(f"Не удалось сохранить повреждённый файл настроек: {backup_error}")
 
             self._settings = AppSettings()
-            try:
-                self.save(self._settings)
-            except OSError:
-                pass
+            if preserved:
+                try:
+                    self.save(self._settings)
+                except OSError as save_error:
+                    self.last_warnings.append(f"Не удалось восстановить настройки: {save_error}")
             return self._settings
 
     def save(self, new_settings: Optional[AppSettings] = None) -> AppSettings:
@@ -418,25 +426,47 @@ class SettingsManager:
         }
         encoded = (json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
 
-        tmp_path = self.config_dir / f".settings.json.tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}"
+        # The displaced object is retained: a checked os.replace can otherwise
+        # destroy a file substituted by another process immediately afterwards.
+        from .vault import _exchange_files, _file_identity, _move_noreplace
+        tmp_path = self.config_dir / f".settings.json.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+        recovery = self.config_dir / f".settings.json.recovery.{uuid.uuid4().hex}"
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        parent_fd = os.open(str(self.config_dir), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
-            fd = os.open(str(tmp_path), flags, 0o600)
+            try:
+                previous = os.stat(self.config_file.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                previous = None
+            if previous is not None and (not stat.S_ISREG(previous.st_mode) or
+                (hasattr(os, "getuid") and previous.st_uid != os.getuid())):
+                raise PermissionError("Файл настроек не является обычным файлом пользователя; он сохранён без изменений.")
+            fd = os.open(tmp_path.name, flags, 0o600, dir_fd=parent_fd)
             with os.fdopen(fd, "wb") as fp:
                 fp.write(encoded)
                 fp.flush()
                 os.fsync(fp.fileno())
-
-            if self.config_file.is_symlink():
-                self.config_file.unlink()
-
-            os.replace(str(tmp_path), str(self.config_file))
-            fsync_directory(self.config_dir)
+                candidate = _file_identity(os.fstat(fp.fileno()))
+            if _file_identity(os.stat(tmp_path.name, dir_fd=parent_fd, follow_symlinks=False)) != candidate:
+                raise OSError("Временный файл настроек подменён; операция отменена.")
+            if previous is None:
+                _move_noreplace(parent_fd, tmp_path.name, self.config_file.name)
+            else:
+                if _file_identity(os.stat(self.config_file.name, dir_fd=parent_fd, follow_symlinks=False)) != _file_identity(previous):
+                    raise OSError("Файл настроек изменился; операция отменена.")
+                _move_noreplace(parent_fd, tmp_path.name, recovery.name)
+                moved = os.stat(recovery.name, dir_fd=parent_fd, follow_symlinks=False)
+                if _file_identity(moved)[:4] != candidate[:4]:
+                    raise OSError(f"Временный файл настроек подменён; объект сохранён: {recovery}")
+                os.fsync(parent_fd)
+                _exchange_files(parent_fd, recovery.name, self.config_file.name)
+                os.fsync(parent_fd)
+                displaced = os.stat(recovery.name, dir_fd=parent_fd, follow_symlinks=False)
+                if _file_identity(displaced)[:4] != _file_identity(previous)[:4]:
+                    raise OSError(f"Файл настроек подменён; вытесненный объект сохранён: {recovery}")
+            os.fsync(parent_fd)
+            if _file_identity(os.stat(self.config_file.name, dir_fd=parent_fd, follow_symlinks=False))[:4] != candidate[:4]:
+                raise OSError("Файл настроек изменён при публикации; проверьте файлы восстановления.")
             return self._settings
-        except Exception:
-            if tmp_path.exists() or tmp_path.is_symlink():
-                try:
-                    tmp_path.unlink()
-                except OSError:
-                    pass
-            raise
+        finally:
+            os.close(parent_fd)

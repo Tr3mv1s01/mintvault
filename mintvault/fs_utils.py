@@ -1,4 +1,4 @@
-"""
+r"""
 Безопасный файловый слой MintVault (`fs_utils.py`).
 
 Отвечает за:
@@ -9,6 +9,8 @@
 - Контроль свободного места на диске перед началом записи.
 - Безопасную синхронизацию файлов и родительских каталогов (`os.fsync`) перед атомарным переименованием (`os.replace`).
 """
+
+from contextlib import contextmanager
 
 import errno
 import fcntl
@@ -235,33 +237,12 @@ def ensure_safe_directory_tree(root_path: Path, target_dir: Path, mode: int = 0o
 
 
 def atomic_publish_extracted_file(tmp_path: Path, final_path: Path) -> None:
+    """Move a same-directory temporary file without replacing the destination.
+
+    The former link-then-unlink implementation could unlink a substituted file.
     """
-    Атомарно публикует проверенный временный файл `tmp_path` под именем `final_path`
-    БЕЗ перезаписи существующего файла (защита от TOCTOU).
-    Использует системный вызов `os.link(tmp_path, final_path)` + `os.unlink(tmp_path)`,
-    который на уровне ядра Linux гарантированно возвращает `FileExistsError` (`EEXIST`),
-    если `final_path` уже существует (включая симлинки).
-    """
-    try:
-        os.link(str(tmp_path), str(final_path))
-        os.unlink(str(tmp_path))
-        return
-    except FileExistsError as exc:
-        raise FileOverwriteError(
-            f"Целевой файл уже существует и не будет перезаписан: {final_path}"
-        ) from exc
-    except OSError as exc:
-        # Нет переносимого атомарного аналога link(..., EEXIST) в стандартной
-        # библиотеке. Не заменяем его lstat()+os.replace(): между вызовами
-        # может появиться пользовательский файл, который os.replace затрёт.
-        # При неподдерживаемых hardlink операция безопасно завершается ошибкой.
-        if exc.errno in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV):
-            raise OSError(
-                exc.errno,
-                "Файловая система не поддерживает безопасную публикацию без перезаписи",
-                str(final_path),
-            ) from exc
-        raise
+    from .vault import _publish_path_noreplace
+    _publish_path_noreplace(Path(tmp_path), Path(final_path))
 
 
 def make_unique_disk_path(candidate: Path, reserved_paths: Optional[set[Path]] = None) -> Path:
@@ -406,11 +387,31 @@ def check_disk_space(target_dir: str | Path, required_bytes: int, safety_margin_
 
 def fsync_directory(dir_path: str | Path) -> None:
     """Принудительно сбрасывает метаданные каталога на диск (POSIX fsync)."""
+    fd = os.open(str(dir_path), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        fd = os.open(str(dir_path), os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+@contextmanager
+def open_directory_chain(root: Path, relative: Path):
+    """Pin every directory component; never follow symlinks during extraction."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open("/", flags)
+    try:
+        components = root.absolute().parts[1:] + relative.parts
+        for component in components:
+            if component in ("", ".", ".."):
+                raise PathTraversalError("Недопустимый компонент каталога.")
+            try:
+                child = os.open(component, flags, dir_fd=fd)
+            except FileNotFoundError:
+                os.mkdir(component, 0o700, dir_fd=fd)
+                os.fsync(fd)
+                child = os.open(component, flags, dir_fd=fd)
             os.close(fd)
-    except OSError:
-        pass
+            fd = child
+        yield fd
+    finally:
+        os.close(fd)

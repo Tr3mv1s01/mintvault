@@ -15,11 +15,12 @@
   Любое изменение хранилища (добавление файлов, удаление объектов, смена пароля)
   выполняется путём сборки нового контейнера во временном файле `.<vault_name>.mvault.tmp.<pid>`
   в том же каталоге, полного сброса буферов (`flush` + `os.fsync`), криптографической верификации
-  записанного заголовка и индекса и только после этого — атомарной замены `os.replace(tmp_path, vault_path)`.
-  Исходное рабочее хранилище никогда не перезаписывается до успешного завершения новой операции!
+  записанного заголовка и индекса и атомарного обмена с сохранением вытесненного объекта.
+  Файлы восстановления требуют ручной проверки и занимают дополнительное место.
 """
 
 import copy
+import ctypes
 import dataclasses
 import errno
 import fcntl
@@ -67,7 +68,7 @@ from .exceptions import (
     VaultLockedError,
 )
 from .fs_utils import (
-    atomic_publish_extracted_file,
+    open_directory_chain,
     check_disk_space,
     collect_source_items,
     ensure_safe_directory_tree,
@@ -89,10 +90,70 @@ FIXED_PREAMBLE_SIZE = struct.calcsize(FIXED_PREAMBLE_FMT)  # 32 байта
 MAX_HEADER_SIZE = 4 * 1024 * 1024  # 4 МБ
 MAX_INDEX_SIZE = 64 * 1024 * 1024  # 64 МБ
 MAX_KEY_SLOTS = 4
+MAX_RECOVERY_FILES = 10
 MIN_ENCRYPTED_BLOB_SIZE = 5 + AES_GCM_NONCE_SIZE + AES_GCM_TAG_SIZE  # 33 байта
 
 # Настраиваем безопасный логгер, который гарантированно не логирует пароли, ключи или содержимое файлов
 logger = logging.getLogger("mintvault")
+
+
+def _file_identity(st: os.stat_result) -> tuple:
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
+def _exchange_files(parent_fd: int, left: str, right: str) -> None:
+    """Atomically exchange two names on Linux; never fall back to destructive replace."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    try:
+        renameat2 = libc.renameat2
+    except AttributeError as exc:
+        raise OSError(errno.ENOTSUP, "renameat2 is required for safe vault updates") from exc
+    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    renameat2.restype = ctypes.c_int
+    if renameat2(parent_fd, os.fsencode(left), parent_fd, os.fsencode(right), 2) != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+
+
+def _move_noreplace(parent_fd: int, source: str, destination: str) -> None:
+    """Atomically move an existing name without replacing the destination."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    try:
+        renameat2 = libc.renameat2
+    except AttributeError as exc:
+        raise OSError(errno.ENOTSUP, "renameat2 is required for safe vault updates") from exc
+    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    renameat2.restype = ctypes.c_int
+    if renameat2(parent_fd, os.fsencode(source), parent_fd, os.fsencode(destination), 1) != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+
+
+def _publish_path_noreplace(tmp: Path, dest: Path) -> None:
+    """Atomically move a same-directory file without deleting a raced path."""
+    parent_fd = os.open(str(dest.parent), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        if tmp.parent != dest.parent:
+            raise OSError(errno.EXDEV, "Publication requires a common parent directory")
+        try:
+            _move_noreplace(parent_fd, tmp.name, dest.name)
+        except FileExistsError as exc:
+            raise FileOverwriteError(f"Целевой файл уже существует: {dest}") from exc
+    finally:
+        os.close(parent_fd)
+
+
+def _publish_anonymous_file(file_fd: int, parent_fd: int, name: str) -> None:
+    """Publish an O_TMPFILE inode without replacing an existing destination."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    linkat = libc.linkat
+    linkat.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+    linkat.restype = ctypes.c_int
+    if linkat(file_fd, b"", parent_fd, os.fsencode(name), 0x1000) != 0:
+        err = ctypes.get_errno()
+        if err == errno.EEXIST:
+            raise FileOverwriteError(f"Целевой файл уже существует и не будет перезаписан: {name}")
+        raise OSError(err, os.strerror(err), name)
 
 
 def _canonical_header_bytes(header_dict: Dict[str, Any]) -> bytes:
@@ -125,6 +186,15 @@ def _extract_pid_from_temp_name(name: str, prefix: str) -> Optional[int]:
     if pid_part.isdigit():
         return int(pid_part)
     return None
+
+
+def _validate_entry_tree(entries: Dict[str, VaultEntry]) -> None:
+    for path in entries:
+        parent = posixpath_dirname(path)
+        while parent:
+            if parent in entries and entries[parent].entry_type != "dir":
+                raise IntegrityError(f"Файл не может содержать дочерние объекты: {parent}")
+            parent = posixpath_dirname(parent)
 
 
 def _validate_and_parse_index(
@@ -217,6 +287,8 @@ def _validate_and_parse_index(
 
         entries_map[norm_vp] = entry
 
+    _validate_entry_tree(entries_map)
+
     # Проверяем непрерывность и отсутствие пересечений или посторонних данных в секции блобов
     file_ranges.sort(key=lambda r: r[0])
     expected_cursor = data_start
@@ -281,6 +353,7 @@ class SecureVault:
         self._entries: Dict[str, VaultEntry] = {}  # virtual_path -> VaultEntry
         self._is_unlocked: bool = False
         self._last_added_sources: Dict[str, Tuple[Path, os.stat_result]] = {}
+        self._vault_identity: Optional[tuple] = None
 
     @property
     def is_unlocked(self) -> bool:
@@ -371,30 +444,11 @@ class SecureVault:
         return sorted(orphans)
 
     def cleanup_orphaned_temp_files(self) -> int:
-        """
-        Безопасно удаляет осиротевшие временные файлы прерванных транзакций,
-        проверяя принадлежность, отсутствие симлинков и состояние процесса,
-        сохраняя нетронутым основное рабочее хранилище.
-        """
-        with self._lock:
-            orphans = self.find_orphaned_temp_files()
-            removed = 0
-            current_uid = os.getuid() if hasattr(os, "getuid") else None
-            for orphan in orphans:
-                try:
-                    st = os.lstat(str(orphan))
-                    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
-                        continue
-                    if current_uid is not None and st.st_uid != current_uid:
-                        continue
-                    orphan.unlink()
-                    removed += 1
-                except OSError:
-                    pass
-            if removed > 0:
-                fsync_directory(self.vault_path.parent)
-                logger.info("Удалено незавершённых временных файлов транзакций: %d", removed)
-            return removed
+        """Refuse deletion: filename, uid and PID cannot prove file ownership."""
+        raise MintVaultError(
+            "Автоматическая очистка отключена: происхождение файлов не доказано. "
+            "Проверьте их вручную и сохраните резервные копии."
+        )
 
     @classmethod
     def create(
@@ -478,7 +532,7 @@ class SecureVault:
                 vault._entries = {}
                 vault._is_unlocked = True
 
-                vault._write_atomic_transaction(new_entries={}, source_files_map={})
+                vault._write_atomic_transaction(new_entries={}, source_files_map={}, creating=True)
                 logger.info("Создано новое хранилище: %s", target_path.name)
                 return vault, recovery_key_str
             except Exception:
@@ -592,6 +646,15 @@ class SecureVault:
             secret_buf: Optional[bytearray] = None
             master_key: Optional[bytearray] = None
             try:
+                initial_stat = os.stat(self.vault_path, follow_symlinks=False)
+                # The advisory lock is named by pathname. Hard-linked aliases
+                # have different locks and can otherwise fork concurrent writes.
+                if initial_stat.st_nlink != 1:
+                    raise UnsafeFileObjectError(
+                        "Хранилище имеет несколько жёстких ссылок: параллельная запись небезопасна. "
+                        "Откройте отдельную копию файла."
+                    )
+                initial_identity = _file_identity(initial_stat)
                 info = self.inspect_header(self.vault_path)
                 header_dict = info["header"]
                 index_offset = info["index_offset"]
@@ -649,6 +712,9 @@ class SecureVault:
                     index_offset=index_offset,
                 )
 
+                if _file_identity(os.stat(self.vault_path, follow_symlinks=False)) != initial_identity:
+                    raise IntegrityError("Файл хранилища изменился во время открытия; операция отменена.")
+                self._vault_identity = initial_identity
                 self._master_key = master_key
                 self._header = header_dict
                 self._entries = entries_map
@@ -677,6 +743,7 @@ class SecureVault:
                 zero_memory(self._master_key)
                 self._master_key = None
             self._entries.clear()
+            self._vault_identity = None
             self._last_added_sources.clear()
             self._header = None
             self._is_unlocked = False
@@ -713,6 +780,35 @@ class SecureVault:
                 if q in e.virtual_path.casefold() or q in posixpath_basename(e.virtual_path).casefold()
             ]
 
+    def _validate_import_items(self, items: List[Tuple[Path, str, str, os.stat_result]]) -> None:
+        """Reject the active container, lock, transaction files and recovery files, including hard links."""
+        parent = self.vault_path.parent
+        name = self.vault_path.name
+        prefixes = (f".{name}.tmp.", f".{name}.recovery.")
+        reserved = {name, f".{name}.lock"}
+        identities = set()
+        with os.scandir(parent) as entries:
+            for entry in entries:
+                if entry.name in reserved or entry.name.startswith(prefixes):
+                    st = entry.stat(follow_symlinks=False)
+                    identities.add((st.st_dev, st.st_ino))
+        for source, _, _, st in items:
+            is_reserved_name = source.parent.resolve() == parent and (source.name in reserved or source.name.startswith(prefixes))
+            if is_reserved_name or (st.st_dev, st.st_ino) in identities:
+                raise UnsafeFileObjectError(f"Нельзя импортировать активное хранилище или его служебный файл: {source}")
+
+    def recovery_usage(self) -> Tuple[int, int]:
+        """Return the count and apparent size of recovery entries, without deleting them."""
+        prefix = f".{self.vault_path.name}.recovery."
+        count = total = 0
+        with os.scandir(self.vault_path.parent) as entries:
+            for entry in entries:
+                if entry.name.startswith(prefix):
+                    st = entry.stat(follow_symlinks=False)
+                    count += 1
+                    total += st.st_size
+        return count, total
+
     def find_conflicts(
         self,
         source_paths: List[str | Path],
@@ -735,6 +831,7 @@ class SecureVault:
                 if sp_path.resolve() == self.vault_path:
                     raise UnsafeFileObjectError("Нельзя добавить сам файл активного хранилища внутрь себя.")
                 items = collect_source_items(sp_path, base_virtual_prefix=prefix)
+                self._validate_import_items(items)
                 for _src, virt_path, entry_type, _st in items:
                     if virt_path in self._entries:
                         existing = self._entries[virt_path]
@@ -757,7 +854,7 @@ class SecureVault:
         Добавляет выбранные файлы и каталоги в хранилище.
         КРИТИЧЕСКОЕ ПРАВИЛО: оригинальные файлы на диске НЕ удаляются и НЕ изменяются (только чтение).
         Если во время чтения исходный файл изменился (размер, inode или mtime), операция безопасно прерывается.
-        Запись в хранилище происходит транзакционно через временный файл и атомарный `os.replace`.
+        Запись выполняется через временный файл и атомарный обмен с сохранением предыдущего объекта.
         """
         with self._lock:
             self._require_unlocked()
@@ -771,6 +868,7 @@ class SecureVault:
                 if sp_path.resolve() == self.vault_path:
                     raise UnsafeFileObjectError("Нельзя добавить сам файл активного хранилища внутрь себя.")
                 items = collect_source_items(sp_path, base_virtual_prefix=virtual_dest_prefix(virtual_dest_folder))
+                self._validate_import_items(items)
                 collected.extend(items)
 
             # Создаём глубокую копию текущих записей, чтобы при ошибке транзакции не повредить состояние в памяти
@@ -930,122 +1028,11 @@ class SecureVault:
         user_confirmed: bool = False,
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Tuple[int, List[str]]:
-        """
-        Отдельная, явно подтверждаемая операция безопасного удаления исходных файлов с диска
-        ПОСЛЕ успешного добавления и криптографической верификации в контейнере.
-
-        Гарантии безопасности:
-        1. Без `user_confirmed=True` немедленно отказывает в выполнении (`PermissionError`).
-        2. Сначала выполняет полную криптографическую проверку всех `added_entries` в файле хранилища на диске.
-           Если проверка целостности контейнера не пройдена — ни один исходный файл не удаляется.
-        3. Для каждого исходного файла проверяет через `os.lstat` и `open_safe_regular_file_for_read`,
-           что это тот же самый обычный файл (`st_dev`, `st_ino`, `st_size`, `st_mtime_ns`) и его SHA-256
-           совпадает с зашифрованной копией в хранилище (защита от симлинков и подмены файла через гонку).
-        4. Никогда не удаляет каталоги целиком через `shutil.rmtree`: удаляет только проверенные файлы,
-           а пустые каталоги удаляет через `os.rmdir` только в том случае, если сам каталог был выбран пользователем.
-        """
+        """Original deletion is disabled: pathname checks cannot prevent unlink races."""
         if not user_confirmed:
-            raise PermissionError(
-                "Удаление оригинальных файлов запрещено без явного подтверждения пользователя."
-            )
-
-        with self._lock:
-            self._require_unlocked()
-            if not added_entries:
-                return 0, []
-
-            # Шаг 1: Полная криптографическая проверка целостности добавленных записей на диске
-            self.verify_entries_integrity(added_entries, cancel_check=cancel_check)
-
-            # Определяем, какие корневые пути пользователь явно передавал при добавлении
-            explicit_roots: set[Path] = set()
-            for sp in selected_source_paths:
-                try:
-                    st_sp = os.lstat(str(sp))
-                    if not stat.S_ISLNK(st_sp.st_mode):
-                        explicit_roots.add(Path(sp).resolve())
-                except OSError:
-                    pass
-
-            deleted_files = 0
-            skipped_warnings: List[str] = []
-            dirs_to_cleanup: List[Tuple[Path, os.stat_result]] = []
-
-            for entry in added_entries:
-                if cancel_check and cancel_check():
-                    raise OperationCancelledError("Удаление оригиналов отменено пользователем.")
-
-                snap = self._last_added_sources.get(entry.virtual_path)
-                if snap is None:
-                    skipped_warnings.append(
-                        f"Пропущен '{entry.virtual_path}': отсутствует снимок исходного пути."
-                    )
-                    continue
-
-                src_path, initial_st = snap
-                if entry.entry_type == "dir":
-                    dirs_to_cleanup.append((src_path, initial_st))
-                    continue
-
-                try:
-                    fp, cur_st = open_safe_regular_file_for_read(src_path, expected_stat=initial_st)
-                    with fp:
-                        h = hashlib.sha256()
-                        while chunk := fp.read(256 * 1024):
-                            h.update(chunk)
-                        disk_sha = h.hexdigest()
-
-                    if disk_sha.lower() != entry.sha256.lower():
-                        skipped_warnings.append(
-                            f"Пропущен '{src_path}': контрольная сумма файла изменилась."
-                        )
-                        continue
-
-                    # Повторно сверяем lstat непосредственно перед unlink
-                    st_pre_unlink = os.lstat(str(src_path))
-                    if (
-                        stat.S_ISLNK(st_pre_unlink.st_mode)
-                        or not stat.S_ISREG(st_pre_unlink.st_mode)
-                        or st_pre_unlink.st_ino != initial_st.st_ino
-                        or st_pre_unlink.st_dev != initial_st.st_dev
-                    ):
-                        skipped_warnings.append(
-                            f"Пропущен '{src_path}': обнаружена подмена объекта перед удалением."
-                        )
-                        continue
-
-                    os.unlink(str(src_path))
-                    deleted_files += 1
-                except Exception as exc:
-                    skipped_warnings.append(f"Не удалось удалить '{src_path}': {exc}")
-
-            # Удаляем пустые каталоги (снизу вверх) ТОЛЬКО если они входили в выбранные пользователем папки
-            for dir_path, init_dir_st in sorted(
-                dirs_to_cleanup,
-                key=lambda item: len(str(item[0])),
-                reverse=True,
-            ):
-                try:
-                    resolved_dir = dir_path.resolve()
-                    is_under_explicit_dir = any(
-                        resolved_dir == root or str(resolved_dir).startswith(str(root) + os.sep)
-                        for root in explicit_roots
-                    )
-                    if not is_under_explicit_dir:
-                        continue
-                    cur_dir_st = os.lstat(str(dir_path))
-                    if (
-                        not stat.S_ISLNK(cur_dir_st.st_mode)
-                        and stat.S_ISDIR(cur_dir_st.st_mode)
-                        and cur_dir_st.st_ino == init_dir_st.st_ino
-                        and cur_dir_st.st_dev == init_dir_st.st_dev
-                    ):
-                        os.rmdir(str(dir_path))
-                except OSError:
-                    # Если в каталоге остались другие файлы, os.rmdir безопасно не удалит его
-                    pass
-
-            return deleted_files, skipped_warnings
+            raise PermissionError("Удаление оригиналов требует подтверждения.")
+        self._require_unlocked()
+        return 0, ["Удаление оригиналов отключено для защиты от подмены файлов; оригиналы сохранены."]
 
     def delete_entries(
         self,
@@ -1055,7 +1042,8 @@ class SecureVault:
         """
         Удаляет выбранные файлы или каталоги (вместе со всеми вложенными в каталог объектами) из хранилища.
         Пересобирает контейнер без удалённых блобов в транзакционном режиме Copy-on-Write,
-        чтобы зашифрованные блоки удалённых файлов не оставались в файле хранилища.
+        чтобы зашифрованные блоки удалённых файлов не оставались в текущем файле хранилища.
+        Предыдущие версии, резервные копии и носители могут сохранять удалённые данные.
         """
         with self._lock:
             self._require_unlocked()
@@ -1164,6 +1152,11 @@ class SecureVault:
         """
         if on_conflict not in ("error", "skip", "keep_both", "replace"):
             raise ValueError(f"Недопустимый режим разрешения конфликтов при извлечении: {on_conflict}")
+        # Replacing an existing path can overwrite the active vault or a file
+        # substituted concurrently. Until safe replacement is implemented,
+        # fail before creating or modifying any output.
+        if on_conflict == "replace":
+            raise FileOverwriteError("Замена файлов при извлечении отключена для защиты данных. Выберите другое имя или каталог.")
 
         with self._lock:
             self._require_unlocked()
@@ -1270,7 +1263,6 @@ class SecureVault:
 
             extracted_paths: List[Path] = []
             bytes_done = 0
-            dirs_to_fsync: set[Path] = set()
 
             fp, _ = open_safe_regular_file_for_read(self.vault_path)
             with fp as vault_fp:
@@ -1278,82 +1270,42 @@ class SecureVault:
                     if cancel_check and cancel_check():
                         raise OperationCancelledError("Извлечение файлов отменено пользователем.")
 
-                    if entry.entry_type == "dir":
-                        ensure_safe_directory_tree(dest_root, out_path, mode=entry.mode & 0o777 or 0o755)
-                        dirs_to_fsync.add(out_path)
-                        extracted_paths.append(out_path)
-                        continue
-
-                    ensure_safe_directory_tree(dest_root, out_path.parent, mode=0o755)
-                    verify_no_symlink_components(dest_root, out_path)
-
-                    if not allow_replace_existing:
-                        try:
-                            os.lstat(str(out_path))
-                            raise FileOverwriteError(
-                                f"Целевой файл уже существует и не будет перезаписан: {out_path}"
-                            )
-                        except FileNotFoundError:
-                            pass
-
-                    tmp_extract_path = (
-                        out_path.parent / f".{out_path.name}.mvault_extract.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
-                    )
-                    open_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-                    try:
-                        fd = os.open(str(tmp_extract_path), open_flags, 0o600)
-                        with os.fdopen(fd, "wb") as dst_fp:
+                    relative = out_path.relative_to(dest_root)
+                    with open_directory_chain(dest_root, relative.parent) as parent_fd:
+                        if entry.entry_type == "dir":
+                            with open_directory_chain(dest_root, relative) as directory_fd:
+                                os.fsync(directory_fd)
+                            os.fsync(parent_fd)
+                            extracted_paths.append(out_path)
+                            continue
+                        # Keep plaintext anonymous until it has been fully
+                        # authenticated. Closing the fd discards it on failure.
+                        if not hasattr(os, "O_TMPFILE"):
+                            raise OSError(errno.ENOTSUP, "Файловая система не поддерживает безопасное извлечение O_TMPFILE")
+                        fd = os.open(".", os.O_RDWR | os.O_TMPFILE, 0o600, dir_fd=parent_fd)
+                        with os.fdopen(fd, "wb+") as dst_fp:
                             def _file_progress(curr: int, tot: int) -> None:
                                 if progress_cb:
                                     progress_cb(bytes_done + curr, total_bytes_to_extract, entry.virtual_path)
-
                             decrypt_file_stream(
-                                master_key=self._master_key,
-                                entry_id=entry.entry_id,
+                                master_key=self._master_key, entry_id=entry.entry_id,
                                 file_salt=bytes.fromhex(entry.file_salt_hex),
-                                expected_chunk_count=entry.chunk_count,
-                                expected_plain_size=entry.size,
-                                expected_sha256=entry.sha256,
-                                src_stream=vault_fp,
-                                blob_offset=entry.blob_offset,
-                                blob_length=entry.blob_length,
-                                dst_stream=dst_fp,
-                                cancel_check=cancel_check,
-                                progress_cb=_file_progress,
+                                expected_chunk_count=entry.chunk_count, expected_plain_size=entry.size,
+                                expected_sha256=entry.sha256, src_stream=vault_fp,
+                                blob_offset=entry.blob_offset, blob_length=entry.blob_length,
+                                dst_stream=dst_fp, cancel_check=cancel_check, progress_cb=_file_progress,
                             )
                             dst_fp.flush()
-
-                        verify_no_symlink_components(dest_root, out_path)
-                        os.chmod(str(tmp_extract_path), entry.mode & 0o666 or 0o600)
-                        os.utime(str(tmp_extract_path), (entry.mtime, entry.mtime))
-
-                        if allow_replace_existing:
-                            try:
-                                st_now = os.lstat(str(out_path))
-                                if stat.S_ISLNK(st_now.st_mode) or stat.S_ISDIR(st_now.st_mode):
-                                    raise PathTraversalError(
-                                        f"Небезопасный целевой объект для замены: {out_path}"
-                                    )
-                            except FileNotFoundError:
-                                pass
-                            os.replace(str(tmp_extract_path), str(out_path))
-                        else:
-                            atomic_publish_extracted_file(tmp_extract_path, out_path)
-
-                        dirs_to_fsync.add(out_path.parent)
+                            os.fchmod(dst_fp.fileno(), 0o600)
+                            os.utime(dst_fp.fileno(), (entry.mtime, entry.mtime))
+                            os.fsync(dst_fp.fileno())
+                            candidate_identity = _file_identity(os.fstat(dst_fp.fileno()))
+                            _publish_anonymous_file(dst_fp.fileno(), parent_fd, relative.name)
+                            os.fsync(parent_fd)
+                            if _file_identity(os.stat(relative.name, dir_fd=parent_fd, follow_symlinks=False))[:4] != candidate_identity[:4]:
+                                raise IntegrityError(f"Извлечённый файл изменён при публикации: {out_path}. Проверьте его вручную.")
                         extracted_paths.append(out_path)
                         bytes_done += entry.size
-                    except Exception:
-                        if tmp_extract_path.exists() or tmp_extract_path.is_symlink():
-                            try:
-                                tmp_extract_path.unlink()
-                            except OSError:
-                                pass
-                        raise
-            # Один fsync на каждую уникальную папку в конце (batch-режим)
-            for d in dirs_to_fsync:
-                fsync_directory(d)
-
             return extracted_paths
 
     def verify_integrity(
@@ -1378,10 +1330,16 @@ class SecureVault:
                 index_ok=False,
             )
 
+            try:
+                verification_identity = _file_identity(os.stat(self.vault_path, follow_symlinks=False))
+            except OSError as exc:
+                report.errors.append(f"Не удалось проверить файл хранилища: {exc}")
+                return report
+
             orphans = self.find_orphaned_temp_files()
             if orphans:
                 report.warnings.append(
-                    f"Обнаружено {len(orphans)} временных файлов прерванных операций (основное хранилище не затронуто)."
+                    f"Обнаружено {len(orphans)} файлов с именами, похожими на временные; проверьте их вручную."
                 )
 
             try:
@@ -1474,6 +1432,15 @@ class SecureVault:
                         report.corrupted_entries.append(entry.virtual_path)
                         report.errors.append(f"Файл '{entry.virtual_path}': {exc}")
 
+            try:
+                current_identity = _file_identity(os.stat(self.vault_path, follow_symlinks=False))
+                if current_identity != verification_identity or (
+                    self._vault_identity is not None and current_identity != self._vault_identity
+                ):
+                    report.errors.append("Файл хранилища изменился с момента открытия или во время проверки; откройте его заново.")
+            except OSError as exc:
+                report.errors.append(f"Не удалось подтвердить идентичность хранилища: {exc}")
+
             report.is_valid = (
                 report.header_ok
                 and report.index_ok
@@ -1482,12 +1449,18 @@ class SecureVault:
             )
             return report
 
-    def create_backup(self, backup_dest_path: str | Path) -> Path:
+    def create_backup(
+        self, backup_dest_path: str | Path,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        progress_cb: Optional[Callable[[int, int, str], None]] = None,
+    ) -> Path:
         """
         Создаёт консистентную резервную копию файла хранилища через временный файл и `os.fsync`,
-        затем проверяет заголовок созданной резервной копии и публикует без перезаписи.
+        затем криптографически проверяет все файлы копии и публикует без перезаписи.
+        Требует разблокировки; поддерживает отмену при копировании и проверке.
         """
         with self._lock:
+            self._require_unlocked()
             if not self.vault_path.exists():
                 raise FileNotFoundError("Файл хранилища не существует.")
 
@@ -1509,6 +1482,9 @@ class SecureVault:
 
             try:
                 st_vault = validate_safe_source_object(self.vault_path)
+                if self._vault_identity is None or _file_identity(st_vault) != self._vault_identity:
+                    self.lock()
+                    raise IntegrityError("Открытое хранилище изменено извне; резервное копирование отменено.")
                 check_disk_space(dest.parent, st_vault.st_size)
 
                 tmp_backup = dest.parent / f".{dest.name}.backup_tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}"
@@ -1518,21 +1494,52 @@ class SecureVault:
                     with src_f:
                         fd = os.open(str(tmp_backup), open_flags, 0o600)
                         with os.fdopen(fd, "wb") as dst_f:
-                            shutil.copyfileobj(src_f, dst_f, length=256 * 1024)
+                            copied = 0
+                            while True:
+                                if cancel_check and cancel_check():
+                                    raise OperationCancelledError("Резервное копирование отменено.")
+                                chunk = src_f.read(256 * 1024)
+                                if not chunk:
+                                    break
+                                dst_f.write(chunk)
+                                copied += len(chunk)
+                                if progress_cb:
+                                    progress_cb(copied, max(1, st_vault.st_size), "Копирование")
                             dst_f.flush()
                             os.fsync(dst_f.fileno())
+                            candidate_identity = _file_identity(os.fstat(dst_f.fileno()))
+                        if _file_identity(os.fstat(src_f.fileno())) != self._vault_identity:
+                            self.lock()
+                            raise IntegrityError("Хранилище изменено во время копирования; резервное копирование отменено.")
 
-                    self.inspect_header(tmp_backup)
-                    atomic_publish_extracted_file(tmp_backup, dest)
+                    self._require_unlocked()
+                    probe = SecureVault(tmp_backup)
+                    probe._master_key = bytearray(self._master_key)
+                    probe._is_unlocked = True
+                    try:
+                        if cancel_check and cancel_check():
+                            raise OperationCancelledError("Резервное копирование отменено.")
+                        report = probe.verify_integrity(cancel_check=cancel_check, progress_cb=progress_cb)
+                        if not report.is_valid:
+                            raise IntegrityError("Резервная копия не прошла криптографическую проверку.")
+                    finally:
+                        probe.close()
+                    if cancel_check and cancel_check():
+                        raise OperationCancelledError("Резервное копирование отменено.")
+                    if _file_identity(os.stat(tmp_backup, follow_symlinks=False)) != candidate_identity:
+                        raise IntegrityError("Проверенная временная копия была подменена; резервное копирование отменено.")
+                    if _file_identity(os.stat(self.vault_path, follow_symlinks=False)) != self._vault_identity:
+                        self.lock()
+                        raise IntegrityError("Хранилище заменено во время создания резервной копии; операция отменена.")
+                    _publish_path_noreplace(tmp_backup, dest)
                     fsync_directory(dest.parent)
+                    if _file_identity(os.stat(dest, follow_symlinks=False))[:4] != candidate_identity[:4]:
+                        raise IntegrityError("Резервная копия была подменена при публикации; проверьте файл вручную.")
                     logger.info("Создана резервная копия хранилища: %s", dest)
                     return dest
                 except Exception:
-                    if tmp_backup.exists() or tmp_backup.is_symlink():
-                        try:
-                            tmp_backup.unlink()
-                        except OSError:
-                            pass
+                    # A pathname cannot be safely unlinked conditionally on
+                    # inode identity. Retain any object for manual inspection.
                     raise
             finally:
                 if acquired_temp_lock:
@@ -1542,16 +1549,18 @@ class SecureVault:
         self,
         new_entries: Dict[str, VaultEntry],
         source_files_map: Dict[str, Tuple[Path, os.stat_result]],
+        creating: bool = False,
         cancel_check: Optional[Callable[[], bool]] = None,
         progress_cb: Optional[Callable[[int, int, str], None]] = None,
     ) -> None:
         """
         Внутренний метод атомарной записи хранилища (Copy-on-Write).
-        Не изменяет `self._header` и существующие `self._entries` до успешного `os.replace`.
+        Не изменяет состояние до проверенной публикации нового контейнера.
         """
         assert self._master_key is not None
         assert self._header is not None
 
+        _validate_entry_tree(new_entries)
         candidate_header = copy.deepcopy(self._header)
         candidate_header["updated_at"] = time.time()
         vault_uuid = str(candidate_header["vault_uuid"])
@@ -1563,6 +1572,17 @@ class SecureVault:
 
         tmp_path = self.vault_path.parent / f".{self.vault_path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}"
         old_vault_exists = self.vault_path.exists()
+        if not creating:
+            recovery_count, recovery_bytes = self.recovery_usage()
+            if recovery_count >= MAX_RECOVERY_FILES:
+                raise MintVaultError(
+                    f"Достигнут предел файлов восстановления: {recovery_count} из {MAX_RECOVERY_FILES}, "
+                    f"{recovery_bytes} байт в {self.vault_path.parent}. Запись остановлена; "
+                    "проверьте историю и независимую резервную копию перед ручным переносом файлов восстановления."
+                )
+            if self._vault_identity is None or not old_vault_exists or _file_identity(os.stat(self.vault_path, follow_symlinks=False)) != self._vault_identity:
+                self.lock()
+                raise IntegrityError("Хранилище изменено извне; запись отменена. Откройте его заново.")
 
         total_existing_bytes = sum(
             e.blob_length for e in new_entries.values()
@@ -1624,11 +1644,8 @@ class SecureVault:
 
                             current_st_after = os.lstat(str(src_path))
                             if (
-                                fst_after.st_size != initial_st.st_size
-                                or fst_after.st_mtime_ns != initial_st.st_mtime_ns
-                                or current_st_after.st_ino != initial_st.st_ino
-                                or current_st_after.st_size != initial_st.st_size
-                                or current_st_after.st_mtime_ns != initial_st.st_mtime_ns
+                                _file_identity(fst_after) != _file_identity(initial_st)
+                                or _file_identity(current_st_after) != _file_identity(initial_st)
                             ):
                                 raise MintVaultError(
                                     f"Исходный файл '{src_path}' был изменён другим процессом во время чтения! "
@@ -1695,6 +1712,7 @@ class SecureVault:
                 tmp_fp.write(preamble)
                 tmp_fp.flush()
                 os.fsync(tmp_fp.fileno())
+                candidate_identity = _file_identity(os.fstat(tmp_fp.fileno()))
 
             # 5. Верифицируем только что записанный временный контейнер перед заменой рабочего файла
             chk_info = self.inspect_header(tmp_path)
@@ -1712,18 +1730,68 @@ class SecureVault:
             if chk_plain_idx != plain_index_bytes:
                 raise IntegrityError("Ошибка самопроверки записанного индекса временного файла!")
 
-            # 6. Атомарно заменяем файл хранилища
-            os.replace(str(tmp_path), str(self.vault_path))
-            fsync_directory(self.vault_path.parent)
+            probe = SecureVault(tmp_path)
+            probe._master_key = bytearray(self._master_key)
+            probe._is_unlocked = True
+            try:
+                report = probe.verify_integrity(cancel_check=cancel_check)
+                if not report.is_valid:
+                    raise IntegrityError("Новая версия контейнера не прошла полную проверку; исходный файл сохранён.")
+            finally:
+                probe.close()
+
+            # Keep the displaced object under a recovery name, even if it was
+            # substituted between the identity check and the atomic exchange.
+            if _file_identity(os.stat(tmp_path, follow_symlinks=False)) != candidate_identity:
+                raise IntegrityError("Проверенный временный контейнер был изменён или подменён; запись отменена.")
+            if creating:
+                _publish_path_noreplace(tmp_path, self.vault_path)
+            else:
+                recovery = self.vault_path.parent / f".{self.vault_path.name}.recovery.{uuid.uuid4().hex}"
+                parent_fd = os.open(str(self.vault_path.parent), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    if _file_identity(os.stat(self.vault_path.name, dir_fd=parent_fd, follow_symlinks=False)) != self._vault_identity:
+                        self.lock()
+                        raise IntegrityError("Хранилище изменено извне; запись отменена.")
+                    _move_noreplace(parent_fd, tmp_path.name, recovery.name)
+                    moved = os.stat(recovery.name, dir_fd=parent_fd, follow_symlinks=False)
+                    if _file_identity(moved)[:4] != candidate_identity[:4]:
+                        raise IntegrityError(f"Временный контейнер подменён; вытесненный объект сохранён: {recovery}")
+                    # Persist the recovery name before the exchange: after a crash
+                    # it is either the candidate or the displaced original.
+                    os.fsync(parent_fd)
+                    _exchange_files(parent_fd, recovery.name, self.vault_path.name)
+                    os.fsync(parent_fd)
+                    displaced = os.stat(recovery.name, dir_fd=parent_fd, follow_symlinks=False)
+                    if _file_identity(displaced)[:4] != self._vault_identity[:4]:
+                        self.lock()
+                        raise IntegrityError(f"Во время записи обнаружена подмена. Вытесненный объект сохранён: {recovery}. Проверьте оба файла вручную.")
+                    published = os.stat(self.vault_path.name, dir_fd=parent_fd, follow_symlinks=False)
+                    if _file_identity(published)[:4] != candidate_identity[:4]:
+                        self.lock()
+                        raise IntegrityError(f"Путь хранилища изменён при записи. Проверьте объект восстановления: {recovery}")
+                except BaseException:
+                    # Even an interrupt immediately after the exchange must not
+                    # delete the displaced object. Leave any recovery file intact.
+                    self.lock()
+                    raise
+                finally:
+                    os.close(parent_fd)
+            try:
+                fsync_directory(self.vault_path.parent)
+                current_identity = _file_identity(os.stat(self.vault_path, follow_symlinks=False))
+                if current_identity[:4] != candidate_identity[:4]:
+                    self.lock()
+                    raise IntegrityError("Хранилище изменено после публикации; проверьте файл восстановления.")
+                self._vault_identity = current_identity
+            except OSError:
+                self.lock()
+                raise
             self._header = candidate_header
 
         except Exception:
-            if tmp_path.exists() or tmp_path.is_symlink():
-                if os.environ.get("MINTVAULT_KEEP_ORPHAN_ON_CRASH") != "1":
-                    try:
-                        tmp_path.unlink()
-                    except OSError:
-                        pass
+            # Keep leftover encrypted data: a concurrent pathname substitution
+            # makes even a checked unlink capable of deleting someone else's file.
             raise
 
 

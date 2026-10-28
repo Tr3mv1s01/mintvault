@@ -7,7 +7,7 @@
 - Наглядный индикатор состояния (Заблокировано / Разблокировано) и опциональную автоблокировку при бездействии.
 - Создание нового хранилища с предупреждением о невосстановимости пароля и выдачей 256-битного ключа восстановления.
 - Открытие и разблокировку существующего хранилища (по паролю или по ключу восстановления).
-- Обнаружение и безопасную очистку временных файлов после аварийного завершения записи.
+- Обнаружение имён, похожих на временные файлы после аварийного завершения записи.
 - Добавление файлов и папок через диалоги выбора и перетаскивание мышью (Drag-and-Drop `text/uri-list`), без автоматического удаления оригиналов, с поддержкой опционального проверенного удаления оригиналов только после верификации контейнера и явного подтверждения.
 - Просмотр списка объектов, живой поиск, извлечение с защитой от перезаписи, удаление с подтверждением, полную проверку целостности и создание резервной копии.
 - Полноценное окно настроек GTK 3 с безопасным хранением в профиле пользователя XDG.
@@ -637,7 +637,7 @@ class MintVaultWindow(Gtk.Window):
         self.orphan_warning_label.set_line_wrap(True)
         self.orphan_warning_label.set_xalign(0.0)
         self.btn_clean_orphans = Gtk.Button(label=self._t("btn_clean_orphans"))
-        self.btn_clean_orphans.connect("clicked", self._on_clean_orphans_clicked)
+        self.btn_clean_orphans.set_sensitive(False)
         self.orphan_warning_box.pack_start(self.orphan_warning_label, True, True, 0)
         self.orphan_warning_box.pack_start(self.btn_clean_orphans, False, False, 0)
         card.pack_start(self.orphan_warning_box, False, False, 0)
@@ -1227,9 +1227,8 @@ class MintVaultWindow(Gtk.Window):
         combo_ext.append("ask", tr(lang, "settings_dup_ask"))
         combo_ext.append("skip", tr(lang, "settings_dup_skip"))
         combo_ext.append("keep_both", tr(lang, "settings_dup_keep_both"))
-        combo_ext.append("replace", tr(lang, "settings_dup_replace"))
         combo_ext.append("error", tr(lang, "settings_dup_error"))
-        combo_ext.set_active_id(self.app_settings.extract_conflict_action)
+        combo_ext.set_active_id(self.app_settings.extract_conflict_action if self.app_settings.extract_conflict_action != "replace" else "ask")
         ext_row.pack_start(lbl_ext_act, True, True, 0)
         ext_row.pack_start(combo_ext, False, False, 0)
         sec2.pack_start(ext_row, False, False, 2)
@@ -1243,7 +1242,8 @@ class MintVaultWindow(Gtk.Window):
         chk_offer_del_orig = Gtk.CheckButton(
             label=tr(lang, "settings_chk_offer_delete_originals")
         )
-        chk_offer_del_orig.set_active(self.app_settings.offer_delete_originals_after_add)
+        chk_offer_del_orig.set_active(False)
+        chk_offer_del_orig.set_sensitive(False)
         sec2.pack_start(chk_offer_del_orig, False, False, 0)
 
         suppress_toggle_warn = {"active": False}
@@ -1280,7 +1280,8 @@ class MintVaultWindow(Gtk.Window):
         sec3.pack_start(lbl_s3, False, False, 0)
 
         chk_conf_vdel = Gtk.CheckButton(label=tr(lang, "settings_chk_confirm_vault_delete"))
-        chk_conf_vdel.set_active(self.app_settings.confirm_before_vault_delete)
+        chk_conf_vdel.set_active(True)
+        chk_conf_vdel.set_sensitive(False)
         sec3.pack_start(chk_conf_vdel, False, False, 0)
 
         chk_conf_lext = Gtk.CheckButton(label=tr(lang, "settings_chk_confirm_large_extract"))
@@ -1374,10 +1375,10 @@ class MintVaultWindow(Gtk.Window):
                 combo_lang.set_active_id(s.language)
                 spin_font.set_value(s.ui_font_scale)
                 combo_dup.set_active_id(s.duplicate_file_action)
-                combo_ext.set_active_id(s.extract_conflict_action)
+                combo_ext.set_active_id(s.extract_conflict_action if s.extract_conflict_action != "replace" else "ask")
                 chk_ask_del_orig.set_active(s.ask_before_deleting_originals)
                 chk_offer_del_orig.set_active(s.offer_delete_originals_after_add)
-                chk_conf_vdel.set_active(s.confirm_before_vault_delete)
+                chk_conf_vdel.set_active(True)
                 chk_conf_lext.set_active(s.confirm_large_extraction)
                 spin_thresh.set_value(s.large_extraction_threshold)
                 combo_close.set_active_id(s.close_unlocked_action)
@@ -1404,7 +1405,7 @@ class MintVaultWindow(Gtk.Window):
                 duplicate_file_action=combo_dup.get_active_id() or "ask",
                 extract_conflict_action=combo_ext.get_active_id() or "ask",
                 ask_before_deleting_originals=chk_ask_del_orig.get_active(),
-                offer_delete_originals_after_add=chk_offer_del_orig.get_active(),
+                offer_delete_originals_after_add=False,
                 language=combo_lang.get_active_id() or "ru",
                 confirm_before_vault_delete=chk_conf_vdel.get_active(),
                 confirm_large_extraction=chk_conf_lext.get_active(),
@@ -2037,7 +2038,7 @@ class MintVaultWindow(Gtk.Window):
             file_entries = [e for e in added if e.entry_type == "file"]
             if (
                 file_entries
-                and op_settings.offer_delete_originals_after_add
+                and False  # Original deletion disabled after security audit.
                 and self.app_settings.offer_delete_originals_after_add
             ):
                 self._offer_verified_originals_deletion(target_vault, paths, added, op_settings)
@@ -2159,8 +2160,6 @@ class MintVaultWindow(Gtk.Window):
         btn_skip = dlg.add_button(self._t("btn_ext_skip"), 201)
         btn_skip.get_style_context().add_class("primary-button")
         dlg.add_button(self._t("btn_ext_keep_both"), 202)
-        btn_repl = dlg.add_button(self._t("btn_ext_replace"), 203)
-        btn_repl.get_style_context().add_class("danger-button")
         dlg.set_default_response(201)
 
         resp = dlg.run()
@@ -2169,8 +2168,6 @@ class MintVaultWindow(Gtk.Window):
             return "skip"
         if resp == 202:
             return "keep_both"
-        if resp == 203:
-            return "replace"
         return None
 
     def _on_extract_clicked(self, _btn: Gtk.Button) -> None:
@@ -2226,6 +2223,8 @@ class MintVaultWindow(Gtk.Window):
         target_vault = self.vault
         notify_done = self.app_settings.notify_long_operations
         ext_policy = self.app_settings.extract_conflict_action
+        if ext_policy == "replace":
+            ext_policy = "ask"
 
         if ext_policy == "ask":
             try:
@@ -2295,18 +2294,17 @@ class MintVaultWindow(Gtk.Window):
             )
             return
 
-        if self.app_settings.confirm_before_vault_delete:
-            preview_list = "\n".join(f"• {p}" for p in selected_vps[:8])
-            if len(selected_vps) > 8:
-                preview_list += "\n" + self._t("and_more_items", count=len(selected_vps) - 8)
-
-            confirmed = self._ask_confirmation(
-                self._t("dlg_delete_vault_title"),
-                self._t("dlg_delete_vault_body", count=len(selected_vps), preview=preview_list),
-                confirm_label=self._t("btn_confirm_delete_vault"),
-            )
-            if not confirmed:
-                return
+        # Always show the warning: recovery copies can retain removed data.
+        preview_list = "\n".join(f"• {p}" for p in selected_vps[:8])
+        if len(selected_vps) > 8:
+            preview_list += "\n" + self._t("and_more_items", count=len(selected_vps) - 8)
+        confirmed = self._ask_confirmation(
+            self._t("dlg_delete_vault_title"),
+            self._t("dlg_delete_vault_body", count=len(selected_vps), preview=preview_list),
+            confirm_label=self._t("btn_confirm_delete_vault"),
+        )
+        if not confirmed:
+            return
 
         target_vault = self.vault
 
@@ -2395,7 +2393,7 @@ class MintVaultWindow(Gtk.Window):
         notify_done = self.app_settings.notify_long_operations
 
         def _worker(_cancel_cb: Callable[[], bool], _prog_cb: Callable[[int, int, str], None]) -> Path:
-            return target_vault.create_backup(backup_path)
+            return target_vault.create_backup(backup_path, cancel_check=_cancel_cb, progress_cb=_prog_cb)
 
         def _on_backed_up(saved_path: Path) -> None:
             self.status_label.set_text(self._t("status_backup_ok", path=saved_path))

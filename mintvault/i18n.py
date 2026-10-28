@@ -49,8 +49,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "unlock_title": "<span size='large' weight='bold'>🔒 Разблокировка хранилища</span>",
         "unlock_file_info": "Файл: <b>{path}</b>\nРазмер контейнера: {size}",
         "orphan_warning_text": (
-            "Обнаружены незавершённые временные файлы ({count} шт.) от прерванной ранее записи. "
-            "Ваше основное хранилище не повреждено. Вы можете безопасно очистить временные файлы."
+            "Обнаружены файлы с именами, похожими на временные ({count} шт.). "
+            "Их происхождение не подтверждено; автоматическая очистка отключена. Проверьте их вручную."
         ),
         "btn_clean_orphans": "Очистить временные файлы",
         "status_orphans_cleaned": "Удалено временных файлов прерванных операций: {count}",
@@ -204,9 +204,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "and_more_items": "… и ещё {count} объект(ов)",
         "dlg_delete_vault_title": "Подтвердите удаление из хранилища",
         "dlg_delete_vault_body": (
-            "Вы действительно хотите безвозвратно удалить выбранные объекты ({count} шт.) "
-            "из зашифрованного хранилища?\n\n{preview}\n\n"
-            "Внимание: при удалении папки будут удалены и все вложенные в неё файлы внутри хранилища."
+            "Удалить выбранные объекты ({count} шт.) из текущей версии хранилища? "
+            "\n\n{preview}\n\n"
+            "Предыдущие версии восстановления и резервные копии могут содержать удалённые данные и открываться прежним паролем. Физическое стирание не гарантируется. При удалении папки удаляются также вложенные объекты."
         ),
         "btn_confirm_delete_vault": "Удалить из хранилища",
         "task_deleting_vault": "Удаление выбранных объектов и пересборка контейнера...",
@@ -279,7 +279,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
             "добавленных файлов и потребует вашего явного подтверждения."
         ),
         "settings_sec_security": "Безопасность и подтверждения операций",
-        "settings_chk_confirm_vault_delete": "Запрашивать подтверждение перед удалением объектов из хранилища",
+        "settings_chk_confirm_vault_delete": "Всегда предупреждать о сохранённых версиях перед удалением",
         "settings_chk_confirm_large_extract": "Запрашивать подтверждение перед извлечением большого числа объектов",
         "settings_lbl_large_extract_threshold": "Порог количества объектов для предупреждения при извлечении:",
         "settings_lbl_close_action": "При закрытии окна с разблокированным хранилищем:",
@@ -367,8 +367,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "unlock_title": "<span size='large' weight='bold'>🔒 Unlock Vault</span>",
         "unlock_file_info": "File: <b>{path}</b>\nContainer size: {size}",
         "orphan_warning_text": (
-            "Found {count} unfinished temporary file(s) from a previously interrupted write. "
-            "Your main vault is intact. You can safely clean up the temporary files."
+            "Found {count} file(s) with names resembling temporary files. "
+            "Their origin is unverified; automatic cleanup is disabled. Inspect them manually."
         ),
         "btn_clean_orphans": "Clean Temp Files",
         "status_orphans_cleaned": "Removed unfinished temporary files: {count}",
@@ -522,9 +522,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "and_more_items": "… and {count} more item(s)",
         "dlg_delete_vault_title": "Confirm Deletion from Vault",
         "dlg_delete_vault_body": (
-            "Are you sure you want to permanently delete the selected items ({count}) "
-            "from the encrypted vault?\n\n{preview}\n\n"
-            "Note: deleting a folder also deletes all nested files inside it within the vault."
+            "Remove the selected items ({count}) from the current vault version? "
+            "\n\n{preview}\n\n"
+            "Recovery versions and backups may retain deleted data and remain accessible with older passwords. Physical erasure is not guaranteed. Removing a folder also removes its contents."
         ),
         "btn_confirm_delete_vault": "Delete from Vault",
         "task_deleting_vault": "Deleting selected items and rebuilding container...",
@@ -597,7 +597,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
             "pass cryptographic verification, and will still require your explicit confirmation."
         ),
         "settings_sec_security": "Security & Operation Confirmations",
-        "settings_chk_confirm_vault_delete": "Ask for confirmation before deleting items from the vault",
+        "settings_chk_confirm_vault_delete": "Always warn about retained versions before deletion",
         "settings_chk_confirm_large_extract": "Ask for confirmation before extracting a large number of items",
         "settings_lbl_large_extract_threshold": "Item count threshold for large extraction confirmation:",
         "settings_lbl_close_action": "When closing window with an unlocked vault:",

@@ -100,6 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_backup.add_argument("vault", help="Путь к исходному файлу хранилища (.mvault)")
     p_backup.add_argument("destination", help="Путь для сохранения резервной копии")
 
+    p_backup.add_argument("--recovery", action="store_true", help="Использовать ключ восстановления")
+
     return parser
 
 
@@ -123,7 +125,7 @@ def run_doctor() -> int:
         print(f"Графическая подсистема GTK 3: НЕДОСТУПНА ({exc})")
         return 1
 
-    print("Статус: Система полностью готова к безопасной работе.")
+    print("Статус: Проверенные компоненты окружения доступны; безопасность системы не оценивалась.")
     return 0
 
 
@@ -217,6 +219,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     finally:
                         secret = ""
                 rep = vault.verify_integrity()
+                if rep.is_valid and args.header_only:
+                    print("Структура заголовка проверена. Криптографическая целостность содержимого НЕ подтверждена.")
+                    return 0
                 if rep.is_valid:
                     print(
                         f"ЦЕЛОСТНОСТЬ ПОДТВЕРЖДЕНА: проверено файлов {rep.verified_files}/{rep.total_files}, "
@@ -230,10 +235,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                     return 3
 
         if cmd == "backup":
-            vault = SecureVault(args.vault)
-            out = vault.create_backup(args.destination)
-            print(f"Резервная копия успешно создана и проверена: {out}")
-            return 0
+            secret = _read_secret_interactive(
+                "Введите ключ восстановления: " if args.recovery else "Введите пароль хранилища: "
+            )
+            try:
+                with SecureVault(args.vault) as vault:
+                    vault.unlock(secret, use_recovery_key=args.recovery)
+                    out = vault.create_backup(args.destination)
+                    print(f"Резервная копия успешно создана и проверена: {out}")
+                return 0
+            finally:
+                secret = ""
 
         parser.print_help()
         return 1
